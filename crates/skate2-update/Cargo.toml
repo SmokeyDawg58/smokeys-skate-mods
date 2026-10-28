@@ -1,0 +1,16 @@
+[package]
+name = "skate2-update"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+ed25519-dalek = "=2.2.0"
+sha2 = "=0.10.9"
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
+zip = { version = "=6.0.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[lints]
+workspace = true

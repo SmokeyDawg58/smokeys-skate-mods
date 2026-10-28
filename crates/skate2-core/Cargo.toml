@@ -1,0 +1,27 @@
+[package]
+name = "skate2-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+skate3-runtime = ["skate3-source"]
+skate3-source = ["dep:skate_data", "dep:skate_dynamics", "dep:skate_mods", "dep:skate_net", "dep:bevy_math", "dep:bevy_transform", "dep:bevy_log", "dep:serde_json", "dep:serde"]
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"], optional = true }
+skate_data = { package = "skate-data", path = "../../vendor/skate3-engine/crates/skate-data", optional = true }
+skate_dynamics = { package = "skate-dynamics", path = "../../vendor/skate3-engine/crates/skate-dynamics", optional = true }
+skate_mods = { package = "skate-mods", path = "../../vendor/skate3-engine/crates/skate-mods", optional = true }
+skate_net = { package = "skate-net", path = "../../vendor/skate3-engine/crates/skate-net", optional = true }
+bevy_math = { version = "=0.18.1", optional = true }
+bevy_transform = { version = "=0.18.1", default-features = false, features = ["std"], optional = true }
+bevy_log = { version = "=0.18.1", optional = true }
+serde_json = { version = "=1.0.154", optional = true }
+skate3-core = { package = "skate-core", path = "../../vendor/skate3-engine/crates/skate-core" }
+skate2-formats = { path = "../skate2-formats" }
+skate2-net = { path = "../skate2-net" }
+
+[lints]
+workspace = true

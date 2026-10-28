@@ -1,0 +1,45 @@
+name: Bug report
+description: Tell us what went wrong in the game or updater.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Please don't post game files, saves, passwords, tokens, or unreviewed logs. See the support guide before sharing diagnostics."
+  - type: input
+    id: versions
+    attributes:
+      label: Mod update and game version
+      placeholder: "For example: Update 42 / Skate 2 Rust Port 0.2.9"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Where did it happen?
+      options:
+        - Free skate or career
+        - Online lobby or challenge
+        - Menus or replay
+        - Installer or updater
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the map, settings, exact error, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open ...\n2. Choose ...\n3. See ..."
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or reviewed log excerpts
+      description: Remove personal details before posting publicly. This section is optional.

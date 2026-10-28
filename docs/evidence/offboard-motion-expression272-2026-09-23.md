@@ -1,0 +1,9 @@
+# Raw Y off-board replay: Motion expression 272
+
+The mounted original-data Y replay in `artifacts/post-reboot-raw-y-update-gates-2026-09-23.log` reaches frame 33 with Action 9, Motion 101 (`IdleDismount`), and `PendingExpression(272)`. This is a reached graph boundary, not evidence that off-board physical entry has occurred.
+
+The debug XEX's generated Motion Pre switch case 272 begins at `0x82911b80`. At `0x82911ba0` it loads `sConditions + 0x654`, condition 405; `0x82911ba4` calls `StateConditionDirect_IsInDebugAnimationsMode`; `0x82911bb4..c4` caches the returned bit and `0x82911bd0..d8` reuses it. There is one operand and no negation. The Rust arm therefore delegates `272 => c(405)?` to the existing per-pass condition cache.
+
+The condition activation at `0x82c8cba0..b4` first assigns its parent at `+0x10`, then reads the target of `Sk8::Conditions::kUseDebugAnimationsMode` at `0x830a4d04` and the target's boolean byte at `+0xcd`. Its dynamic initializer `0x82f82fe0` registers section `Animation_Skater`, label `kUseDebugAnimationsMode`, title `Debug Animations Mode`, default false, no update callback; its initializer-table entry is `0x82fd4d14`, immediately after existing `kDebugWipeoutConditions` at `0x82fd4d10`. The selected cvar registry adds stable slot 356 after the existing slots and inserts it immediately after slot 44 in native registration order. The Motion condition reads the retained linked target on each uncached evaluation; an absent target remains an explicit error.
+
+The existing `PlainCondition::IsInDebugAnimationsMode` and condition declaration 405 were already loaded and are reused. The narrow edits add the Pre expression, the condition dispatch, and that one cvar target. The focused tests check the expression's sole read and the cvar's unlinked/default/INI/relinked behavior. Root owns the Cargo build and mounted replay; neither was run here.

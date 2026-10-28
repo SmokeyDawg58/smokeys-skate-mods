@@ -1,0 +1,11 @@
+# Motion expression 180, scripted frame 13
+
+Confidence: **exact** for both native evaluator arms and the one condition read; **high** for the loaded graph and serialized intent mapping. This packet covers expression 180 only.
+
+The mounted raw-pad replay in `artifacts/motion-expression411-scripted-2026-09-23.log` advances through expression 411, then stops in frame 13's Actor Motion prefix at `PendingExpression(180)`. The loaded graph declares state 1247 `CrailGrab.Into`, active, parent 1153 `CrailGrab`, with expression 180, one behaviour beginning at 2258 and three transitions beginning at 1576. Condition 273 is a separate `HasIntent` declaration with one attribute, 2619: `intent=CrailGrab`.
+
+In the debug executable `sk82_na_m.xex`, `HCDelegate_MotionGraph_OnBoard::EvaluateExpression<1>` at `0x8290aa50` dispatches table slot `0x8290aa90 + 180*4 = 0x8290ad60` to `0x8290f6a4`. IDA labels the preceding `bctr` as `jpt_8290AA8C`. This arm tests the active bit at delegate `+0x20`, calls `StateConditionDirect_HasIntent` at `0x8290f6c8` on a miss with `sConditions` slot `+0x444` (`273 * 4`), then publishes the result at `+0x54` and its active bit. The cache hit at `0x8290f6f4` returns the saved bit. Both paths return the raw Boolean value of condition 273. The wrapper at `0x82cc2908` sets the condition parent to the passed state before calling `HasIntent::ActivationFunc`.
+
+`HCDelegate_MotionGraph_OnBoard::EvaluateExpression<2>` at `0x8291e218` dispatches table slot `0x8291e254 + 180*4 = 0x8291e524` to `0x829221c8`, which returns one without sampling a condition. IDA labels the preceding `bctr` as `jpt_8291E250`. Native `GetStateActivation<1>` at `0x8292b8b8` and `<2>` at `0x8292b808` are the caller routes for these masks.
+
+The current generated Motion runtime already owns the condition cache, parent tag, and retained intent lookup. It has no expression 180 arm. The unregistered `artifacts/motion-expression180-pre-sustain-2026-09-23-draft.patch` adds Pre `c(273)` and Sustain constant true, plus a focused test for both results, failed condition propagation, and no Sustain reads. The injected Rust error checks only that its existing `Result` path preserves the single native read; it is not a native error value. Root integration, Cargo gates and the next mounted replay are pending. No registered file was edited in this packet.

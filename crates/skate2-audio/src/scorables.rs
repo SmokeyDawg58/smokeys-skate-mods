@@ -1,0 +1,67 @@
+//! `Sk8::Score::gScorableInfo` 0x823671b0 names (24-byte records, `mName` at +0x14), read for
+//! `Score::GetScorableIDString` 0x82dee050.
+
+/// The names of the 269 `EScorableID`s.
+pub const SCORABLE_NAMES: [&str; 269] = [
+    "fspowerslide", "bspowerslide", "nosemanual", "tailmanual", "fsrevert", "bsrevert", "bs_5_o",
+    "bs_50_50", "bs_blunt", "bs_board", "bs_crook", "bs_feeble", "bs_lip", "bs_noseblunt",
+    "bs_nosegrind", "bs_noseslide", "bs_overcrook", "bs_overwilly", "bs_salad", "bs_smith",
+    "bs_tailslide", "bs_willy", "fs_5_o", "fs_50_50", "fs_blunt", "fs_board", "fs_crook",
+    "fs_feeble", "fs_lip", "fs_noseblunt", "fs_nosegrind", "fs_noseslide", "fs_overcrook",
+    "fs_overwilly", "fs_salad", "fs_smith", "fs_tailslide", "fs_willy", "grind5_o", "grind5050",
+    "grindcrooks", "grindfeeble", "grindnose", "grindovercrooks", "grindoverwilly", "grindsalad",
+    "grindsmith", "grindwilly", "slideblunt", "slideboard", "slidelip", "slidenblunt", "slidenose",
+    "slidetail", "bsgrab", "bsgrab_down", "bsgrab_left", "bsgrab_right", "bsgrab_up", "christ_air",
+    "coffin", "dblgrab", "fsgrab", "fsgrab_down", "fsgrab_left", "fsgrab_right", "fsgrab_up",
+    "gnd_bsgrab", "gnd_dblgrab", "gnd_fsgrab", "mutegrab", "mutegrab_down", "mutegrab_left",
+    "mutegrab_up", "nosegrab", "nosegrab_left", "nosegrab_right", "rocketair", "stalegrab",
+    "stalegrab_down", "stalegrab_left", "stalegrab_up", "tailgrab", "tailgrab_left",
+    "tailgrab_right", "360flip", "360hardflip", "360inwardheelflip", "360popshuvit",
+    "fs360popshuvit", "fspopshuvit", "hardflip", "heelflip", "heelflip2", "heelflip3",
+    "inwardheelflip", "kickflip", "kickflip2", "kickflip3", "laserflip", "latebackfootheelflip",
+    "latebackfootkickflip", "latebsshuv", "latefsshuv", "lateheelflip", "latekickflip", "n_360flip",
+    "n_360hardflip", "n_360inwardheelflip", "n_360popshuvit", "n_fs360popshuvit", "n_fspopshuvit",
+    "n_hardflip", "n_heelflip", "n_heelflip2", "n_heelflip3", "n_inwardheelflip", "n_kickflip",
+    "n_kickflip2", "n_kickflip3", "n_laserflip", "n_popshuvit", "n_varialheelflip",
+    "n_varialkickflip", "popshuvit", "varialheelflip", "varialkickflip", "nollie", "ollie",
+    "air_horizontal_distance", "air_height_to_peak", "air_total_height_gain", "air_player_spin",
+    "air_player_flip", "heelflip4", "kickflip4", "n_heelflip4", "n_kickflip4", "nofoot_air",
+    "fs_handplant", "fs_handplant_up", "fs_handplant_right", "fs_handplant_left",
+    "fs_handplant_down", "fs_handplant_onefoot_front", "fs_handplant_onefoot_back",
+    "fs_handplant_nofoot", "fs_handplant_to_fakie", "fs_handplant_to_revert", "bs_handplant",
+    "bs_handplant_up", "bs_handplant_right", "bs_handplant_left", "bs_handplant_down",
+    "bs_handplant_onefoot_front", "bs_handplant_onefoot_back", "bs_handplant_nofoot",
+    "bs_handplant_to_fakie", "bs_handplant_to_revert", "bs_handplant_mount",
+    "bs_handplant_dismount", "bs_handplant_to_flat", "fs_onefoot_right", "fs_backfoot",
+    "bs_onefoot_front", "bs_onefoot_behind", "nosegrab_onefoot_front", "nosegrab_onefoot_behind",
+    "tailgrab_onefoot_front", "tailgrab_onefoot_behind", "ollie_onefoot_front",
+    "ollie_onefoot_back", "tailgrab_airwalk", "fsgrab_fingerflip", "bsgrab_fingerflip",
+    "nosegrab_fingerflip", "tailgrab_fingerflip", "mutegrab_fingerflip", "stalegrab_fingerflip",
+    "fsgrabvarial_fingerflip", "bsgrabvarial_fingerflip", "fs_rock_n_roll", "bs_rock_n_roll",
+    "fakie_rock", "dropin", "dropin_fs_revert", "dropin_bs_revert", "crailgrab", "crailgrab_left",
+    "crailgrab_right", "seatbeltgrab", "seatbeltgrab_left", "seatbeltgrab_right", "fs_50_50_fsgrab",
+    "fs_50_50_bsgrab", "fs_nosegrind_tailgrab", "fs_nosegrind_bsgrab", "fs_crook_tailgrab",
+    "fs_crook_bsgrab", "bs_crook_tailgrab", "bs_crook_bsgrab", "fs_noseslide_tailgrab",
+    "bs_noseslide_tailgrab", "fs_noseblunt_tailgrab", "bs_noseblunt_tailgrab", "fs_5_o_fsgrab",
+    "fs_5_o_nosegrab", "fs_salad_fsgrab", "fs_salad_nosegrab", "bs_salad_fsgrab",
+    "bs_salad_nosegrab", "fs_tailslide_nosegrab", "bs_tailslide_nosegrab", "fs_blunt_tailgrab",
+    "bs_blunt_tailgrab", "fsboneless", "bsboneless", "fsfastplant", "bsfastplant",
+    "bsgrab_fs_footplant", "bsgrab_bs_footplant", "fsgrab_fs_footplant", "fsgrab_bs_footplant",
+    "nosegrab_fs_footplant", "nosegrab_bs_footplant", "tailgrab_fs_footplant",
+    "tailgrab_bs_footplant", "ollie_fs_footplant", "ollie_bs_footplant", "nocomply",
+    "no_comply_fs180", "no_comply_bs180", "no_comply_fs360", "no_comply_bs360", "hippyjump",
+    "hippyjump_fs180", "hippyjump_bs180", "air_metric", "fsgrabtostalegrab_fingerflip",
+    "bsgrabtomutegrab_fingerflip", "stalegrabtofsgrab_fingerflip", "mutegrabtobsgrab_fingerflip",
+    "bs_50_50_fsgrab", "bs_50_50_bsgrab", "bs_nosegrind_tailgrab", "bs_nosegrind_bsgrab",
+    "bs_5_o_fsgrab", "bs_5_o_nosegrab", "fs_overcrook_tailgrab", "fs_overcrook_bsgrab",
+    "bs_overcrook_tailgrab", "bs_overcrook_bsgrab", "superman", "generic_metric",
+    "nosegrab_airwalk", "seatbelttonose_fingerflip", "crailtotail_fingerflip", "fs_board_double",
+    "fs_board_tail", "fs_board_nose", "bs_board_double", "bs_board_tail", "bs_board_nose",
+    "fs_lip_double", "fs_lip_tail", "fs_lip_nose", "bs_lip_double", "bs_lip_tail", "bs_lip_nose",
+];
+
+/// `Score::GetScorableIDString`: "INVALID" outside 0..269.
+#[must_use]
+pub fn scorable_id_string(id: i32) -> &'static str {
+    usize::try_from(id).ok().and_then(|index| SCORABLE_NAMES.get(index)).copied().unwrap_or("INVALID")
+}

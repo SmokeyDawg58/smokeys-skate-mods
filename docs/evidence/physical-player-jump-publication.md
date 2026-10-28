@@ -1,0 +1,13 @@
+# Update1 jump publication after the parked grind stage
+
+Source: original IDA raw82e038f0..82e03a80, function Update1_ProcessInput82e01f98. This adapter resumes after the source GrindManager call82e038ec; host exclusion of that parked call is an explicit schedule restriction, not evidence that GrindManager ran. No investigation or query result is fabricated or cleared. TrajectorySelector.Update82e03a88 remains the next boundary.
+
+Ground guard38f4 precedes actual Ground.wallRideExit+120 at3918. True stores HiLOD+128=0 at3924. The retained counter is then incremented with native wrapping at393c/3940. Source captures lhz Processed+8d0 at3944 and word8c4 at3948; big-endian halfword bit0 maps to full-word00010000. Jump event is word8c4 mask00400000. Either forced flag or event plus HiLOD120/40000000 selects reset branch3994. Only that branch reads kbDrawJumpDebugInfo and optionally requires the actual DebugOverlay holder; no draw call exists. Missing target/overlay preserves the already incremented HiLOD counter and leaves later processed publication untouched. Success clears counter39d0 and HiLOD latch39d8. Other branch publishes inverse captured event to the HiLOD latch3980, then clears only processed event398c. Processed91c publication39e4 follows both branches.
+
+Fresh Air guard39ec precedes stateTriggeredJump+1aa at3a10. True writes corrected counter HiLOD12c=1 at3a1c, performs a SECOND guard3a24, then copies full Air intended-velocity vector to HiLOD110 at3a4c/50. False increments the retained corrected counter3a5c/60. Source publishes processed920 at3a74 and full retained HiLOD110 to processed350 at3a7c/80. SkeletonRootVector retains known W or unknown W without synthetic zero. Existing HiLOD tail velocity storage is reused with this typed representation.
+
+Reset proof:82b39464 sets r10=1000;82b39520 stores it at920. r28=350 at392d8;39388 stores known-zero v60 there. Generic processed fields remain None until Reset or publication. HiLOD initial intended velocity remains known all-zero from the existing post-Ground initializer.
+
+Cvar79: reference830e0c40, initializer82f9e8b8, static table82fd62ac; section Physics_Skateboard, label/title kbDrawJumpDebugInfo, false, null callback. Native static order before constructor flag19 at62b0. Live getter samples current target only on reset branch.
+
+Focused controlled-owner tests construct real PhysOut components on a factory-issued owner: distinguish low word bit1 from native big-endian halfword bit, prove unlinked debug target preserves counter increment but not later processed writes, and prove actual Air known-W/unknown-W full-vector transport with wall-exit reset. Root owns original same-pair integration and verification; no Cargo was run by this agent.

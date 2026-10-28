@@ -1,0 +1,13 @@
+[package]
+name = "skate2-xma"
+version = "0.1.0"
+description = "XMA (WMA Pro) frame decoder ported from FFmpeg's wmaprodec"
+edition.workspace = true
+license = "LGPL-2.1-or-later"
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

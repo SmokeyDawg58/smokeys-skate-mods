@@ -1,0 +1,15 @@
+# Ground.UpdateHandplants inactive continuation
+
+Status: unregistered draft, no Cargo run. Confidence high for the selected inactive branch; active launch and IK remain explicit pending.
+
+Ground.Update82da0de8 calls UpdateHandplants82d8d258 at0e9c after its retained Reckoning update. Entry reads actual processed byte+8cc atd274 and its bit0 atd278, equivalent to full BE word mask01000000 (`GrabWorld`, produced by ProcessAnimAttributes). This is neither a grinds-parking policy flag nor airborne board-grab input. Runtime checks this real flag each call and never assumes an idle category.
+
+When clear, d284 reads the same Ground.HandPlantManager+20, d288 calls existing Reset82db5c78. Fresh manager pointer d28c locates IkData+9d0. d2a8 writes ikBlend+0 positive zero; d2b0 stores complete Math.VECFLOAT_NEG_ONE at IK+10; d2b4 reads IK flags+20; d2bc writes flags masked3fffffff. Returnd2cc precedes Ground caller's Skeleton.UpdateGroundSkateboard0ea8.
+
+Fresh raw Reset review confirms the existing retained HandPlantManager.reset implementation: trajectoryReady+9c0=false, animation flags+5d4 &=4fffffff, max estimated-apex+5d0, animation position+5c0 zero, found-position+5e0 false, result position+5f0 zero, dirVsUp+600 zero; four splatted -1 vectors+960/970/980/990, zero+9a0/9b0, surface+9c4=0, grind-normal+950 zero. All zeros that decompilation portrayed as uninitialized stack vectors are explicitly initialized at5d34..5d5c. Existing reset intentionally leaves IK, selector/futures, query provenance, trajectories and matrices intact. The new helper invokes that same reset, then performs only the separate caller IK writes.
+
+The actual Sim constructor new_sim already retains this manager and initializes IK distance to full -1, blend0 and flags0; no fresh manager or defaults are injected at update. Repeated reset is nevertheless a source action and must not be optimized away from an assumed constructor state. Tests mutate these fields and verify query readiness and uncleared flag bits survive.
+
+If GrabWorld is set, the draft returns ActiveLaunchPrefixPending at active bodyd2d0 before any claim that local launch-data assembly or later committed-direction stores ran. The complete active route copies processed COM velocity+250, deck velocity+190, ground+1d0, look+230 and retained Reckoning heading+1e0; tests NewHandPlant/AnimCommittedHandPlant+8d0; updates committed direction/counter; conditionally calls GetDirVsUp and live global handplant attribute; calls Launch; then conditionally constructs HandPlantIkInfo and calls UpdateIK82d8d4f4. None is replaced with fabricated launch vectors, targets, misses or flags. This is the explicit next active continuation, not a completed handplant subsystem.
+
+No new cvars or shared state fields are needed for the selected inactive path. Proposed registration: constraint_session child physical_ground_handplants, world method try_update_pair_ground_handplants(board,skeleton), mounted immediately after successful Ground/Reckoning prefix on the actual selected state.

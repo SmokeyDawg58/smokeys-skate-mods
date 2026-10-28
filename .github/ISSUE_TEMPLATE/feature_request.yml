@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest an improvement to Smokey's Skate Mods.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What's your idea?
+      description: What would it do, and where would players use it?
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Anything else?
+      description: Add examples or references if you have them.

@@ -1,0 +1,7 @@
+# Camera frame publication prefix handoff (2026-09-23)
+
+The source packet is `camera-frame-publication-next-source-2026-09-23.md`. The isolated, unapplied registered-file patch is `camera-frame-publication-prefix-2026-09-23.patch`; it adds `camera_frame_publication_prefix.rs` and its test module to the camera owner, threads the source reciprocal of `dT` from `UpdateRig` entry, and advances the explicit diagnostic to `PendingCameraEulerFromMatrix`. Only root should apply it after separate independent review.
+
+The new module copies the composer reference and framing offsets into Frame, then writes retained CameraMan velocity from current position minus the prior Frame translation, multiplied by the source reciprocal. It preserves vector W knowledge and leaves both matrices and Frame velocity untouched. Focused tests cover zero and negative-zero reciprocal gating, reference/velocity W behavior, old-translation use, and absence of early matrix writes. `rustfmt --edition 2024` succeeded for both new Rust files. `git apply --check -- docs/evidence/camera-frame-publication-prefix-2026-09-23.patch` passed against the shared tree. No registered source was edited and no Cargo command was run by this author.
+
+The first frame remains blocked at `EulerXYZFromMatrix33` at `82e48564`. The later three normalized Euler-angle inserts, subject speed/distance scratch, ShakeEffect::Apply, positioner shake offset, retry matrix choice, and previous-matrix choice require their own source audit and implementation. The prefix is not a completed camera frame.

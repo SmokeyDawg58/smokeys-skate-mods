@@ -1,0 +1,35 @@
+//! Native parsers for Skate 2 data formats.
+
+pub mod ai_path;
+pub mod andale;
+pub mod apt;
+pub mod attrib;
+pub mod behaviour;
+pub mod big;
+pub mod collision;
+pub mod cac_parts;
+pub mod ea_movie;
+pub mod ea_xa;
+pub mod hash;
+pub mod host_path;
+pub mod ice_camera;
+pub mod location;
+pub mod lua_chunk;
+pub mod localization;
+pub mod irradiance;
+pub mod material;
+pub mod mount;
+pub mod pegasus;
+pub mod recipe;
+pub mod refpack;
+pub mod render;
+pub mod ropa;
+pub mod rw4;
+pub mod shader;
+pub mod skater_profile;
+pub mod state_graph;
+pub mod stfs;
+pub mod stream;
+pub mod stream_xml;
+pub mod boundary_xml;
+pub mod vp6;

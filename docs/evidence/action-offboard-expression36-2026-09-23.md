@@ -1,0 +1,9 @@
+# Reached Action expression 36 during raw Y dismount
+
+The mounted raw Y replay completed frame 33 in Action state 9 (`TransitioningToOffBoard`) and Motion state 101 (`IdleDismount`). At frame 34 it stopped at `Tick(Actor(Action(Update(PendingExpression(36))))`; see `artifacts/post-reboot-raw-y-sustain0-teleport-guard-2026-09-23.log`. The physical state was still Ground. This is an Action graph selection gap, not a missing offboard physics state.
+
+IDA debug build `HCDelegate_ActionGraph_OnBoard::EvaluateExpression<1>` at `0x828ff990`, case `0x24` (expression 36), returns cached condition 135 from `mConditionResults.mActive[4] & 0x80` and value bit 7, or calls `StateConditionDirect_PhysFilteredState(sConditions[135].mpObject, c, p)` and stores that result in the same bit. `EvaluateExpression<2>` at `0x82906048`, case `0x24`, has the same condition read and cache behavior. Both masks therefore evaluate only condition 135, with no inversion or extra gate.
+
+The mounted generated Action condition declaration 135 is `PhysFilteredState` with attribute 385, `state=offboardair`. The retained runtime already resolves `PhysFilteredState` through `Actor::action_runtime_filtered_state` and the original state attribute in `generated_action_runtime.rs`; no new physical-state implementation is introduced by this selection case. The new `(_, 36) => c(135)?` entry in `generated_action_runtime_selection.rs` uses that existing cached condition path. In frame 34 Ground, condition 135 should be false, letting selection continue to the next reached source branch.
+
+The existing ignored mounted test `original_scripted_raw_pad_y_reaches_selected_dismount_boundary` is the nonredundant integration check for this route; run it after compilation and inspect the next actual boundary. This change was source-reviewed here but the replay result was pending at the time of this note.

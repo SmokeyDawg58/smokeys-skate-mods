@@ -1,0 +1,69 @@
+/target/
+/.venv-tools/
+__pycache__/
+/artifacts/*
+!/artifacts/.gitkeep
+
+# User-supplied game/debug material must remain external.
+*.xex
+*.pdb
+*.xdb
+*.map
+*.i64
+*.id0
+*.id1
+*.nam
+*.til
+*.big
+*.rx2
+*.xsf
+*.vp6
+*.mus
+
+# Local machine configuration.
+.env
+release-secret.txt
+release-server.txt
+/dist/
+/config.json
+/online-config.json
+/local-paths.bat
+/skate3-pack-path.txt
+local.toml
+*.log
+
+# The dedicated server's private files, wherever they are kept: its word list, settings,
+# moderation panel key and ban lists.
+badwords.txt
+server-config.json
+moderation-key.txt
+chat-shadowbans.json
+chat-shadowbans.json.new
+ip-bans.json
+ip-bans.json.new
+
+# Local working notes, saves and game files: never published.
+/private-notes/
+/saves/
+/ROM/
+/.scratch/
+/diagnostics/
+/.as.txt
+/*-trace.txt
+/render-log.txt
+
+# Development launchers and compiled research tools: not part of the published source.
+/play-*.bat
+/run_game.bat
+/tools/*.exe
+
+# Decompiler output, native table extracts and old working patches stay local.
+/docs/evidence/*.txt
+/docs/evidence/*.json
+/docs/evidence/*.patch
+/docs/evidence/*.py
+
+# Original-game-derived local build inputs must remain outside Git.
+/apps/skate2-pc/src/pool-ground.bin
+/local-build-inputs/
+*.dpapi

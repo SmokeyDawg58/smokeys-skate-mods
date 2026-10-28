@@ -1,0 +1,16 @@
+[package]
+name = "skate2-audio"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+skate2-formats = { path = "../skate2-formats" }
+skate2-xma = { path = "../skate2-xma" }
+
+[lints]
+workspace = true

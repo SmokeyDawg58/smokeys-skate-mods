@@ -1,0 +1,27 @@
+# Native first-frame skater-ground query gates (2026-09-23)
+
+Read-only IDA/PDB audit of the matched `sk82_na_m.xex.i64`, following [pool refresh](assembly-pool-refresh.md), [ground Run](assembly-ground-run-integration.md), and [adjusted spawn geometry](wheel-spawn-geometry-2026-09-23.md). Addresses and call order below are **exact** source observations. The first-frame outcome for the native board remains **unmeasured**. No code or Cargo command changed or ran.
+
+`SkaterManager::OnCommand` command 3 calls `AdjustSpawnPosition` before `SpawnPlayer` (`0x82600998`, `0x826009b4`). On its gated World line hit, the adjustment adds Y `0.15000001` to the hit (`0x825f1a20..0x825f1bb8`). The board constructor later relocates the live deck and wheel Parts through `SkateboardBody::SetTransform` (`0x82b388b4`, `0x82b34a90..0x82b34d98`). The exact native line result, live Part matrices, and body motion at the first ground job have not been captured.
+
+For the flags-3 tick, `Step_Update1` begins SkaterPool update, then `Step_Collision1` completes `SkaterPool::EndUpdate` at `0x827b3838` before submitting skater-ground Run at `0x827b39ec` (see [flags-3 order](flags3-collision2-source-gap-2026-09-23.md)). `SerialisedAssembly::Update` refreshes VolumeData but leaves Header AABB `+0x20` unchanged. The pool bounds job `0x827cdf78..0x827ce110` calls the **free** `CalculatePartBBox` at `0x827ce088` / `0x827c94c0`, not the namespaced serializer helper `0x82e0b760`. The free helper calls the concrete `Volume::GetBBox(transform, 1, ...)`, checks its success, sweeps with live body motion and literal timestep `0x3c888889`, then expands by literal `0x3f866666` (about `1.05`); it also has final debug assertions. The job computes every non-Aggregate volume regardless of frozen, static, or enabled state, unions their boxes at `0x827ce0c8`, and writes a separate pool AABB. `EndUpdate` copies both vectors to each Header `+0x20` at `0x82e0bb7c..0x82e0bb88`. This is the AABB read by the following ground job, not the earlier Create snapshot.
+
+`AssemblyGroundCollisionJob` skips an all-frozen or all-static assembly (`0x827cdcc8..0x827cdce4`). For a processed assembly it prepares non-Aggregate per-volume Part boxes at `0x827cdd60..0x827cddbc`, then calls `BoxTest<AssemblyTriangleIntersectionTester,1>` once per ground collection at `0x827cdeb4` with **Header AABB `+0x20`**. Outer `BoxTest` `0x827cd960..0x827cdb98` transforms that box by each mesh inverse at `0x827cd9dc`, rejects a mesh when its saved KD-root AABB has no closed XYZ overlap (`0x827cd9ec..0x827cda14`), and otherwise gathers at most `0x100` KD range descriptors. `RipTriangles` `0x827cd7c8..0x827cd960` admits a ripped world triangle only after `AABoxTriangleOverlapTestOpt` against the same Header box (`0x827cd868`; job passes `spew=false`). Only admitted triangles reach `RunIntersectionTests`; there, each wheel volume needs its **own** swept Part-box overlap with that triangle (`0x827cd1e0..0x827cd7c8`). The later `0.05` VolumeData padding and `0.5` generator padding do not enlarge either terrain-query box or the pre-contact Part-box overlap.
+
+The original upright wheel center is `0.0565` below deck, with sphere radius about `0.031`. If a native gated line hit is exactly a flat plane at the wheel X/Z, the deck is set exactly `0.15` above it, and all relevant body sweep terms are zero, the wheel's final `1.05`-expanded box bottom is approximately `0.15 - 0.0565 - 1.05*0.031 = 0.06095` above that plane. This is a **conditional calculation for a wheel**, not the full board Header bound or an observed native query. Other board volumes, live forces/velocities, terrain height away from the spawn line, mesh KD-root extents, and the first-frame native Header and per-volume boxes can change the gate outcome. Thus the native board **can** be excluded from a terrain triangle query by these source gates, but the available evidence cannot say it **was** excluded at this spawn.
+
+The adjusted-spawn Rust frame 1 reported two submitted triangles across two processed assemblies and zero Contacts; that aggregate count does not identify whether the board or Skeleton supplied the triangles. The first native discriminating capture is the post-`EndUpdate` board Header AABB, each wheel Part AABB, the mesh-local transformed query box, saved mesh/KD-root AABB, range count, and Rip triangle-overlap results for the same command-3 spawn. If a board triangle passes, record the subsequent per-wheel Run overlap and narrow-phase gate. The native cvar/line hit and triangle coordinates at wheel X/Z must accompany those boxes.
+
+## Subsequent Rust two-frame query capture
+
+The optional board query trace in
+`artifacts/controlled-skating-release2-first-ground-query-2026-09-23.log`
+shows Rust frame 1's refreshed board Header bbox Y range about
+`-54.37005..-54.23859`. It overlaps three resident mesh KD roots. Meshes 0
+and 1 supply no KD ranges; mesh 2 supplies one; the board admits **zero**
+triangles to Run. Frame 2 admits two board triangles. The sampled flat
+terrain triangles in frame 2 are at Y `-54.431004`, about `0.06095` below
+the frame-1 Header minimum. The capture does not print the frame-1 KD
+descriptor contents or ripped triangle candidates, so it does not prove the
+exact final Rust rip rejection. It also does not provide the native matched
+frame, which remains the required parity boundary.

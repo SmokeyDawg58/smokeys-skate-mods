@@ -1,0 +1,16 @@
+{
+  "skate2": {
+    "repository": "https://github.com/skate6743/skate2-rust-port",
+    "base": "22063407933ce9e35c59b2fb62062e7d331ac513",
+    "upstream": "20ac75e7238655fe08a65c27f8a6d0642915ae33",
+    "version": "0.2.5",
+    "tag_note": "The v0.2.5 release tag points to the v0.2.4 commit; synced to origin/main at the v0.2.5 commit.",
+    "method": "Working-tree three-way merge preserving native integration; HEAD not reset."
+  },
+  "skate3": {
+    "repository": "https://github.com/SK8-ENGINE/skate-3-rust-engine",
+    "upstream": "2e16697797c8358d16f747a8259354ff2921041a",
+    "captured_base": "60efdef86600d8d8d4feb4b7c608fa0efd0643d7",
+    "method": "Vendored dependencies and in-core production algorithms updated; S2 host adapters retained."
+  }
+}

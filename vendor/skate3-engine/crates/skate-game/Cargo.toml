@@ -1,0 +1,48 @@
+[package]
+name = "skate-game"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "skate3rust"
+path = "src/main.rs"
+
+[[bin]]
+name = "skate3-multiplayer"
+path = "src/multiplayer_main.rs"
+test = false
+
+[[bin]]
+name = "skate3-custom-models"
+path = "src/custom_models_main.rs"
+test = false
+
+[features]
+embedded-assets = []
+default = ["dev-dynamic"]
+standalone-audio = []
+dev-dynamic = ["bevy/dynamic_linking"]
+
+[dependencies]
+bevy_internal = { version = "=0.18.1", default-features = false }
+bevy = { version = "=0.18.1", default-features = false, features = ["default_app", "default_platform", "2d_bevy_render", "3d_bevy_render", "ui_bevy_render", "scene", "picking", "jpeg", "trace", "debug"] }
+skate-core.workspace = true
+skate-data.workspace = true
+half = "=2.7.1"
+serde_json.workspace = true
+serde.workspace = true
+    skate-net = { path = "../skate-net" }
+blake3 = "=1.8.7"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
+skate-mods = { path = "../skate-mods" }
+skate-dynamics = { path = "../skate-dynamics" }
+skate-audio = { path = "../skate-audio" }
+gltf = { version = "=1.4.1", default-features = true }
+# SDL3 gamepad input for every platform, built from source and statically linked.
+sdl3 = { version = "=0.20.0", features = ["build-from-source-static"] }
+
+[dev-dependencies]
+naga = { version = "=27.0.3", features = ["wgsl-in"] }
+naga_oil = { version = "=0.20.0", default-features = false }
+wgpu = { version = "=27.0.1", default-features = false, features = ["vulkan", "naga-ir"] }
