@@ -10,6 +10,8 @@ The updater can offer a verified official-game fallback for an existing mod inst
 
 - **Smokeys-Skate-Mods-Installer-Windows.zip** — recommended for new users. Extract it and put the installer beside your existing `skate2-pc.exe`.
 - **Smokeys-Skate-Mods-Update-42-Windows.zip** — the tested game executable and licenses for manual installation. Back up your current EXE first; direct replacement alone may not register the installation with the updater.
+- **skate2-pc.exe** — the same tested executable by itself, for users who prefer a direct download.
+- **Smokeys-Skate-Mods-Source-Update-42.zip** — the documented source snapshot, excluding private and game-derived build inputs.
 - **SHA256SUMS.txt** — checksums for the release files.
 
 You need your own extracted Skate 2 game files. Windows is the validated platform for this mod release. Source builds require local game-derived inputs; see `docs/BUILDING-SMOKEY.md` in the repository.

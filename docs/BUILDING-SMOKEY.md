@@ -39,6 +39,28 @@ The landing notifier must remain beside `skate3-player.pack`; the app build scri
 
 The rain beds and their credits are in the source. The old build script also accepts optional rain header/stream variables, but the current weather-audio path uses the included credited PCM beds.
 
+### Windows compiler debug-database error
+
+If the SDL native build fails with MSVC `C1902: Program database manager mismatch`, repair or update the Visual Studio C++ Build Tools first. A workaround used for the Update 42 source check is to use Ninja from a Visual Studio developer shell and place the following CMake toolchain file **outside** the repository (for example, `C:\SkateBuildInputs\embedded-debug.cmake`):
+
+```cmake
+set(CMAKE_C_FLAGS_DEBUG "/Ob0 /Od /RTC1 /Z7" CACHE STRING "" FORCE)
+set(CMAKE_CXX_FLAGS_DEBUG "/Ob0 /Od /RTC1 /Z7" CACHE STRING "" FORCE)
+set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded CACHE STRING "" FORCE)
+set(CMAKE_POLICY_DEFAULT_CMP0141 NEW)
+```
+
+With Ninja available on `PATH` and the build-input environment variables above set, run:
+
+```powershell
+$env:CMAKE_GENERATOR = 'Ninja'
+$env:CMAKE_TOOLCHAIN_FILE = 'C:/SkateBuildInputs/embedded-debug.cmake'
+$env:CARGO_TARGET_DIR = 'C:/SkateBuildInputs/cargo-check-target'
+cargo check --locked -p skate2-pc
+```
+
+Use a fresh target directory when changing CMake generators or toolchains. This checks compilation; it does not prove that an executable works online. These environment settings apply to the current shell.
+
 ## Online build identity
 
 A local development build does **not** automatically share the public release server's build identity. Joining that server requires a matching, authorized input for the exact upstream version; no private network identity or release-signing key is in this repository. Do not publish or commit those values. Use the checked release for public online play, or follow the upstream project's authorized development/server workflow.
