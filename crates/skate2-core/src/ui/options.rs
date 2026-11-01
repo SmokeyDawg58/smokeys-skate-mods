@@ -65,6 +65,8 @@ pub enum Row {
     Skate3Physics,
     WeatherSettings,
     AllSkate3Physics,
+    PhysicsMode,
+    Motorized,
     Darkcatch,
     Footplants,
     Offboard,
@@ -132,7 +134,7 @@ impl Row {
             Self::PostFx | Self::Fisheye | Self::FrameRateCap | Self::VSync | Self::ResolutionScale
             | Self::FpsCounter | Self::Fullscreen | Self::Subtitles | Self::CameraAngle | Self::GrindTransparency
             | Self::MiniMap | Self::Hud | Self::OffboardYAxis | Self::Vibration | Self::ShowLobbyChat
-            | Self::ShowGhostPlayers | Self::StickMultiplier | Self::AllSkate3Physics | Self::Darkcatch | Self::Footplants | Self::Offboard | Self::Difficulty | Self::AirtimeSlowMotion | Self::Weather | Self::WaterPhysics | Self::DebugCameraBind => "selector",
+            | Self::ShowGhostPlayers | Self::StickMultiplier | Self::AllSkate3Physics | Self::PhysicsMode | Self::Motorized | Self::Darkcatch | Self::Footplants | Self::Offboard | Self::Difficulty | Self::AirtimeSlowMotion | Self::Weather | Self::WaterPhysics | Self::DebugCameraBind => "selector",
         }
     }
     /// `gGameOptionsItems`' title id; the PC rows carry literal text.
@@ -145,11 +147,13 @@ impl Row {
             Self::ControlSettings => "ID_GAMESETTINGS_CONTROL_SETTINGS",
             Self::DisplaySettings => "Display Settings",
             Self::Mods => "Mods",
-            Self::Skate3Physics => "Skate 3 Physics",
+            Self::Skate3Physics => "Physics",
             Self::WeatherSettings => "Weather",
             Self::Keybinds => "Keybinds",
             Self::DebugCameraBind => "Debug Camera",
             Self::AllSkate3Physics => "All Skate 3 Physics",
+            Self::PhysicsMode => "Physics",
+            Self::Motorized => "Motorized",
             Self::Darkcatch => "Darkcatch",
             Self::Footplants => "Footplants",
             Self::Offboard => "Offboard",
@@ -204,7 +208,7 @@ const IN_GAME: &[Row] = &[
 const AUDIO: &[Row] = &[Row::SfxVolume, Row::DialogueVolume, Row::MusicVolume, Row::RainVolume];
 const MODS: &[Row] = &[Row::Skate3Physics, Row::WeatherSettings, Row::Keybinds];
 const KEYBINDS: &[Row] = &[Row::DebugCameraBind];
-const SKATE3_PHYSICS: &[Row] = &[Row::AllSkate3Physics, Row::Difficulty];
+const SKATE3_PHYSICS: &[Row] = &[Row::PhysicsMode, Row::Difficulty, Row::Motorized];
 const WEATHER_SETTINGS: &[Row] = &[Row::Weather, Row::WaterPhysics];
 /// `gGameOptionsScreens` rows 7, 3 and 5 without `eSk8FEGameOption_VideoCalibration`, whose
 /// FE state 0 calibration screen is not ported.
@@ -318,7 +322,7 @@ impl Snapshot {
             Page::Display => "Display Settings",
             Page::Online => "Online Settings",
             Page::Mods => "Mods",
-            Page::Skate3Physics => "Skate 3 Physics",
+            Page::Skate3Physics => "Physics",
             Page::WeatherSettings => "Weather",
             Page::Keybinds => "Keybinds",
             Page::StickSettings => "Stick Settings",
@@ -698,10 +702,14 @@ impl Controller {
                 }
                 return Action::None;
             }
-            Row::AllSkate3Physics | Row::Darkcatch | Row::Footplants | Row::Offboard | Row::Difficulty | Row::AirtimeSlowMotion => {
+            Row::AllSkate3Physics | Row::PhysicsMode | Row::Motorized | Row::Darkcatch | Row::Footplants | Row::Offboard | Row::Difficulty | Row::AirtimeSlowMotion => {
                 self.sounds.push(if input.right { "FE_SOUND_CORE_NAV_RIGHT" } else { "FE_SOUND_CORE_NAV_LEFT" });
-                if row == Row::Difficulty {
-                    self.state.gameplay.step_difficulty(input.right);
+                if row == Row::PhysicsMode {
+                    self.state.gameplay.step_physics(input.right);
+                } else if row == Row::Difficulty {
+                    self.state.gameplay.step_preview_difficulty(input.right);
+                } else if row == Row::Motorized {
+                    self.state.gameplay.toggle_motor();
                 } else if row == Row::AirtimeSlowMotion {
                     self.state.gameplay.airtime_slow_motion = !self.state.gameplay.airtime_slow_motion;
                 } else {
@@ -905,6 +913,37 @@ mod tests {
         assert_eq!(menu.update(press(|input| input.cancel = true), &mut settings), Action::Exit);
     }
     #[test]
+    fn physics_menu_keeps_mode_difficulty_and_motor_separate() {
+        use super::super::gameplay::{Difficulty, GameplayConfig};
+        let mut profile = ProfileSettings::default();
+        let mut menu = Controller::default();
+        menu.open_mods(VideoScreen::FreeSkate, &profile);
+        menu.acknowledge_intro();
+        menu.update(press(|i| i.select = true), &mut profile);
+        assert_eq!(menu.snapshot().rows(), &[Row::PhysicsMode, Row::Difficulty, Row::Motorized]);
+        assert_eq!(menu.snapshot().gameplay.physics_label(), "Skate 2");
+        assert_eq!(menu.snapshot().gameplay.difficulty.simple_label(), "Normal");
+        menu.update(press(|i| i.right = true), &mut profile);
+        assert_eq!(menu.snapshot().gameplay.physics_label(), "Skate 3");
+        menu.update(press(|i| i.down = true), &mut profile);
+        menu.update(press(|i| i.right = true), &mut profile);
+        assert_eq!(menu.snapshot().gameplay.difficulty.simple_label(), "Hardcore");
+        menu.update(press(|i| i.down = true), &mut profile);
+        menu.update(press(|i| i.right = true), &mut profile);
+        assert_eq!(menu.snapshot().gameplay.difficulty, Difficulty::HardcoreMotorized);
+        menu.update(press(|i| i.up = true), &mut profile);
+        menu.update(press(|i| i.right = true), &mut profile);
+        assert_eq!(menu.snapshot().gameplay.difficulty, Difficulty::EasyMotorized);
+        menu.update(press(|i| i.up = true), &mut profile);
+        menu.update(press(|i| i.left = true), &mut profile);
+        let selected = menu.snapshot().gameplay;
+        assert_eq!(selected.physics_label(), "Skate 2");
+        assert_eq!(selected.difficulty, Difficulty::EasyMotorized);
+        let saved = GameplayConfig { settings: selected };
+        assert_eq!(GameplayConfig::parse(&saved.text()).unwrap(), saved);
+        assert_eq!(GameplayConfig::parse(r#"{"version":"3","difficulty":"skate2"}"#).unwrap().settings.difficulty, Difficulty::Skate2Default);
+    }
+    #[test]
     fn skate3_mods_navigation_keeps_independent_difficulty_and_profile() {
         let mut settings = ProfileSettings::default();
         let original_profile = settings;
@@ -924,7 +963,7 @@ mod tests {
         menu.update(press(|input| input.left = true), &mut settings);
         let features = menu.snapshot().gameplay.skate3;
         assert_eq!(features, super::super::gameplay::Skate3Features::ALL);
-        assert_eq!(menu.snapshot().gameplay.difficulty.label(), "Easy Motorized");
+        assert_eq!(menu.snapshot().gameplay.difficulty.simple_label(), "Easy");
         menu.update(press(|input| input.cancel = true), &mut settings);
         assert_eq!(menu.snapshot().page, Page::Mods);
         menu.update(press(|input| input.down = true), &mut settings);

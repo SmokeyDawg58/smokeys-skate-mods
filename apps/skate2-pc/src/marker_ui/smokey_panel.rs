@@ -21,7 +21,7 @@ pub(super) fn draw(assets:&Assets, size:(u32,u32), version:&str, status:&str, ba
         (status,1104.,197.,11.,pink),
         ("LATEST UPDATE",982.,228.,10.,pink),
         ("Debug camera & park editor",982.,246.,12.,cream),
-        ("Weather & Skate 3 physics",982.,264.,12.,cream),
+        ("Physics & difficulty settings",982.,264.,12.,cream),
         ("TIP",982.,302.,10.,pink),
         ("Debug Camera: Mods > Keybinds",982.,320.,11.,muted),
         ("Press Y for more",982.,343.,10.,muted),

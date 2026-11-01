@@ -225,9 +225,9 @@ impl SelectedPlayerTick {
         let difficulty = self.mod_settings.difficulty;
         let profile = match difficulty {
             Difficulty::Easy | Difficulty::EasyMotorized => "easy",
-            Difficulty::Normal => "normal",
+            Difficulty::Normal | Difficulty::NormalMotorized => "normal",
             Difficulty::Skate2Default => "custom",
-            Difficulty::Hardcore => "hardcore",
+            Difficulty::Hardcore | Difficulty::HardcoreMotorized => "hardcore",
             Difficulty::Motorized => "motorized",
         };
         let entering = mode.is_none();
@@ -285,7 +285,7 @@ impl SelectedPlayerTick {
             let player = mode.as_mut().expect("loaded");
             match difficulty {
                 Difficulty::Skate2Default => player.set_skate2_profile(&owner.inputs().vault)?,
-                Difficulty::EasyMotorized => {
+                Difficulty::EasyMotorized | Difficulty::HardcoreMotorized | Difficulty::NormalMotorized => {
                     player.set_motorized_profile(profile)?;
                 }
                 _ => player.set_profile(profile)?,

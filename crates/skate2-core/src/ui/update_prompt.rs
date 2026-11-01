@@ -69,7 +69,7 @@ impl UpdatePrompt {
             Self::Downloading { version, percent } => ("#Updating".into(), format!("#Downloading version {version}: {percent}%"), Vec::new(), 0, false),
             Self::OpeningUpdater => ("#Opening Updater".into(), "#Closing the game to open Smokey's updater.".into(), Vec::new(), 0, false),
             Self::GameUpdateNotice { selected } => ("#Game Update".into(), "#The game has updated. Smokey's mod needs a matching update for online play. Install the update now?".into(), vec!["#Install Update".into(), "#Later".into()], *selected, true),
-            Self::ModInfo { selected } => ("#Smokey's Skate Mods".into(), "#LATEST UPDATES\nDebug camera with 20x speed\nObject Dropper and park pieces\nWeather and water physics\n\nTIPS\nDebug Camera: Right Stick + D-pad Right.\nObject Dropper: LB + D-pad Left.\nChange the camera bind in Mods > Keybinds.\nUse Smokey's updater for new releases.".into(), vec!["#Check for Update".into(), "#Close".into()], *selected, true),
+            Self::ModInfo { selected } => ("#Smokey's Skate Mods".into(), "#LATEST UPDATES\nDebug camera with 20x speed\nPhysics, difficulty and Motorized\nWeather and water physics\n\nTIPS\nDebug Camera: Right Stick + D-pad Right.\nObject Dropper: LB + D-pad Left.\nChange the camera bind in Mods > Keybinds.\nUse Smokey's updater for new releases.".into(), vec!["#Check for Update".into(), "#Close".into()], *selected, true),
             Self::CheckResult {message} => ("#Update Check".into(), format!("#{message}"), vec!["ID_COMMON_OK".into()], 0, false),
             Self::Installed { version } => ("#Updating".into(), format!("#Version {version} is installed. The game starts again now."), Vec::new(), 0, false),
             Self::Failed { message } => (

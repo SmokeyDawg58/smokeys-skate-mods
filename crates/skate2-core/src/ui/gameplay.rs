@@ -49,21 +49,21 @@ impl Skate3Features {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Difficulty {
     #[default]
-    Skate2Default, Easy, Normal, Hardcore, Motorized, EasyMotorized,
+    Skate2Default, Easy, Normal, Hardcore, Motorized, EasyMotorized, HardcoreMotorized, NormalMotorized,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TuningSource { Skate2, Skate3(&'static str) }
 impl Difficulty {
-    pub const ALL: [Self; 6] = [Self::Skate2Default, Self::Easy, Self::Normal, Self::Hardcore, Self::Motorized, Self::EasyMotorized];
+    pub const ALL: [Self; 8] = [Self::Skate2Default, Self::Easy, Self::Normal, Self::Hardcore, Self::Motorized, Self::EasyMotorized, Self::HardcoreMotorized, Self::NormalMotorized];
     #[must_use]
     pub const fn key(self) -> &'static str {
         match self { Self::Skate2Default => "skate2", Self::Easy => "easy", Self::Normal => "normal",
-            Self::Hardcore => "hardcore", Self::Motorized => "motorized", Self::EasyMotorized => "easy_motorized" }
+            Self::Hardcore => "hardcore", Self::Motorized => "motorized", Self::EasyMotorized => "easy_motorized", Self::HardcoreMotorized => "hardcore_motorized", Self::NormalMotorized => "normal_motorized" }
     }
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self { Self::Skate2Default => "Skate 2", Self::Easy => "Easy", Self::Normal => "Normal",
-            Self::Hardcore => "Hardcore", Self::Motorized => "Motorized", Self::EasyMotorized => "Easy Motorized" }
+            Self::Hardcore => "Hardcore", Self::Motorized => "Motorized", Self::EasyMotorized => "Easy Motorized", Self::HardcoreMotorized => "Hardcore Motorized", Self::NormalMotorized => "Normal Motorized" }
     }
     #[must_use]
     pub fn parse(key: &str) -> Option<Self> {
@@ -80,17 +80,38 @@ impl Difficulty {
     pub const fn tuning(self) -> TuningSource {
         match self { Self::Skate2Default => TuningSource::Skate2,
             Self::Easy | Self::EasyMotorized => TuningSource::Skate3("easy"),
-            Self::Normal => TuningSource::Skate3("normal"), Self::Hardcore => TuningSource::Skate3("hardcore"),
+            Self::Normal | Self::NormalMotorized => TuningSource::Skate3("normal"), Self::Hardcore | Self::HardcoreMotorized => TuningSource::Skate3("hardcore"),
             Self::Motorized => TuningSource::Skate3("motorized") }
     }
     #[must_use]
-    pub const fn motor_enabled(self) -> bool { matches!(self, Self::Motorized | Self::EasyMotorized) }
+    pub const fn motor_enabled(self) -> bool { matches!(self, Self::Motorized | Self::EasyMotorized | Self::HardcoreMotorized | Self::NormalMotorized) }
+    pub const fn simple_label(self) -> &'static str {
+        match self { Self::Easy | Self::EasyMotorized => "Easy", Self::Hardcore | Self::HardcoreMotorized => "Hardcore", _ => "Normal" }
+    }
+    pub fn with_motor(self, enabled: bool) -> Self {
+        match (self.simple_label(), enabled) {
+            ("Easy", false) => Self::Easy, ("Easy", true) => Self::EasyMotorized,
+            ("Hardcore", false) => Self::Hardcore, ("Hardcore", true) => Self::HardcoreMotorized,
+            (_, false) => Self::Normal, (_, true) => Self::NormalMotorized,
+        }
+    }
+    pub fn step_simple(self, forward: bool) -> Self {
+        let index = match self.simple_label() { "Easy" => 0, "Hardcore" => 2, _ => 1 };
+        let next = [Self::Easy, Self::Normal, Self::Hardcore][(index + if forward { 1 } else { 2 }) % 3];
+        next.with_motor(self.motor_enabled())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GameplaySettings { pub skate3: Skate3Features, pub difficulty: Difficulty, pub airtime_slow_motion: bool }
 impl GameplaySettings {
     pub fn step_difficulty(&mut self, forward: bool) { self.difficulty = self.difficulty.step(forward); }
+    pub fn step_preview_difficulty(&mut self, forward: bool) { self.difficulty = self.difficulty.step_simple(forward); }
+    pub fn toggle_motor(&mut self) { self.difficulty = self.difficulty.with_motor(!self.difficulty.motor_enabled()); }
+    pub const fn physics_label(self) -> &'static str { if self.skate3.all { "Skate 3" } else { "Skate 2" } }
+    pub fn step_physics(&mut self, _forward: bool) {
+        self.skate3 = if self.skate3.all { Skate3Features::default() } else { Skate3Features::ALL };
+    }
     #[must_use]
     pub const fn simulation(self, offboard: bool, board_transition: bool) -> SimulationFamily {
         self.skate3.simulation(offboard, board_transition)
@@ -253,13 +274,30 @@ mod tests {
         }
     }
     #[test]
+    fn physics_difficulty_and_motor_remain_separate_and_persist() {
+        let mut settings = GameplaySettings::default();
+        assert_eq!(settings.physics_label(), "Skate 2");
+        settings.step_physics(true);
+        assert_eq!(settings.physics_label(), "Skate 3");
+        settings.difficulty = Difficulty::Hardcore;
+        settings.toggle_motor();
+        assert_eq!(settings.difficulty, Difficulty::HardcoreMotorized);
+        settings.step_preview_difficulty(true);
+        assert_eq!(settings.difficulty, Difficulty::EasyMotorized);
+        settings.step_physics(true);
+        assert_eq!(settings.physics_label(), "Skate 2");
+        assert_eq!(settings.difficulty, Difficulty::EasyMotorized);
+        let config = GameplayConfig { settings };
+        assert_eq!(GameplayConfig::parse(&config.text()).unwrap(), config);
+    }
+    #[test]
     fn six_difficulties_wrap_without_mutating_features() {
         let mut settings = GameplaySettings { skate3: Skate3Features::ALL, ..GameplaySettings::default() };
         for _ in Difficulty::ALL { settings.step_difficulty(true); assert_eq!(settings.skate3, Skate3Features::ALL); }
         assert_eq!(settings.difficulty, Difficulty::Skate2Default);
-        assert_eq!(Difficulty::Skate2Default.step(false), Difficulty::EasyMotorized);
+        assert_eq!(Difficulty::Skate2Default.step(false), Difficulty::NormalMotorized);
         assert_eq!(Difficulty::EasyMotorized.tuning(), Difficulty::Easy.tuning());
-        assert_eq!(Difficulty::ALL.into_iter().filter(|value| value.motor_enabled()).count(), 2);
+        assert_eq!(Difficulty::ALL.into_iter().filter(|value| value.motor_enabled()).count(), 4);
     }
 }
 

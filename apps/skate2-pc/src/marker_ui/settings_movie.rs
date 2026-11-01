@@ -397,10 +397,12 @@ fn options_row(assets: &Assets, state: &Snapshot, row: Row) -> RenderResult<Edit
             Row::ShowGhostPlayers => on_off(state.show_ghost_players),
             // GetStringValue 0x82643d48: ID_GAMESETTINGS_CAMERA_HIGH for 1, _LOW for 0.
             Row::AllSkate3Physics => on_off(state.gameplay.skate3.all),
+            Row::PhysicsMode => state.gameplay.physics_label(),
+            Row::Motorized => on_off(state.gameplay.difficulty.motor_enabled()),
             Row::Darkcatch => on_off(state.gameplay.skate3.darkcatch),
             Row::Footplants => on_off(state.gameplay.skate3.footplants),
             Row::Offboard => on_off(state.gameplay.skate3.offboard),
-            Row::Difficulty => state.gameplay.difficulty.label(),
+            Row::Difficulty => state.gameplay.difficulty.simple_label(),
             Row::AirtimeSlowMotion => on_off(state.gameplay.airtime_slow_motion),
             Row::Weather => state.weather.label(),
             Row::WaterPhysics => on_off(state.water_physics),
@@ -642,7 +644,7 @@ mod tests {
                     state.gameplay.difficulty = difficulty;
                     movie.update(&assets, state, main.as_mut()).unwrap();
                     let item = movie.root.named(&["mItem1"]).unwrap();
-                    assert_eq!(text(item, &["mSubtitle", "TEXTLABEL"]), difficulty.label());
+                    assert_eq!(text(item, &["mSubtitle", "TEXTLABEL"]), difficulty.simple_label());
                 }
                 state.page = Page::Video;
                 for on in [false,true] {
@@ -659,9 +661,8 @@ mod tests {
                         else { skate2_core::ui::gameplay::Skate3Features::default() };
                     movie.update(&assets, state, main.as_mut()).unwrap();
                     let item = movie.root.named(&["mItem0"]).unwrap();
-                    assert_eq!(text(item, &["mTitle", "TEXTLABEL"]), Row::AllSkate3Physics.title());
-                    assert_eq!(text(item, &["mSubtitle", "TEXTLABEL"]),
-                        assets.localize(if on { "ID_COMMON_ON" } else { "ID_COMMON_OFF" }).unwrap());
+                    assert_eq!(text(item, &["mTitle", "TEXTLABEL"]), Row::PhysicsMode.title());
+                    assert_eq!(text(item, &["mSubtitle", "TEXTLABEL"]), if on { "Skate 3" } else { "Skate 2" });
                 }
                 state.page = Page::Display;
                 movie.update(&assets, state, main.as_mut()).unwrap();

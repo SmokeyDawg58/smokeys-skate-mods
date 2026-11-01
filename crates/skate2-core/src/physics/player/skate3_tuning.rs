@@ -42,6 +42,8 @@ impl Tuning {
             Difficulty::Hardcore => 2,
             Difficulty::Motorized => 3,
             Difficulty::EasyMotorized => 4,
+            Difficulty::HardcoreMotorized => 5,
+            Difficulty::NormalMotorized => 6,
         };
         static PROFILES: OnceLock<Result<Vec<Arc<Tuning>>, String>> = OnceLock::new();
         let profiles = PROFILES
@@ -59,12 +61,18 @@ impl Tuning {
                     ("hardcore", false),
                     ("motorized", true),
                     ("easy", true),
+                    ("hardcore", true),
+                    ("normal", true),
                 ] {
                     let f = |field| data.float("physics_mode", key, field);
                     let motor_key = if motor { "motorized" } else { key };
                     let profile = Self {
                         profile: if key == "easy" && motor {
                             "easy_motorized"
+                        } else if key == "hardcore" && motor {
+                            "hardcore_motorized"
+                        } else if key == "normal" && motor {
+                            "normal_motorized"
                         } else {
                             key
                         },

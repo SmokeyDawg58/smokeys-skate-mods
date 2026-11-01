@@ -1,5 +1,9 @@
 # Smokey's Skate Mods changelog
 
+## Update 44
+
+- Physics is now a separate Skate 2 / Skate 3 choice. Difficulty only lists Easy, Normal and Hardcore, and Motorized has its own toggle. Existing settings are preserved.
+
 ## Update 43
 
 ## New and improved
