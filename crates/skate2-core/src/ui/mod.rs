@@ -33,6 +33,7 @@ pub mod options;
 pub mod gameplay;
 pub mod weather;
 pub mod water_physics;
+pub mod debug_camera_keybinds;
 pub mod music_player;
 pub mod movie_player;
 pub mod replay_editor;

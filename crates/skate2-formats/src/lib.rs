@@ -6,6 +6,7 @@ pub mod apt;
 pub mod attrib;
 pub mod behaviour;
 pub mod big;
+pub mod big_eb;
 pub mod collision;
 pub mod cac_parts;
 pub mod ea_movie;

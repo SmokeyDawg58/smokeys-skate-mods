@@ -80,6 +80,60 @@ const MATERIAL_BYTES: usize = 9 * 16;
 #[cfg(test)]
 #[path = "vehicle_material_tests.rs"]
 mod vehicle_material_tests;
+
+/// The production DMO shader validates and every fragment program, the park decal's
+/// included, links with `defaultVS` over the production vertex layout.
+#[test]
+fn dynamic_object_programs_link() {
+    let instance = wgpu::Instance::default();
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        eprintln!("no adapter; dynamicobject program check skipped");
+        return;
+    };
+    let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default())).expect("device");
+    let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::ShaderSource::Wgsl(
+            format!(
+                "{COMMON}{}{DYNAMIC_OBJECT}\nconst vehicle_diagnostic: u32 = 0u;\n{}{}",
+                object_source(3),
+                include_str!("vehicle_material.wgsl"),
+                include_str!("vehicle_shading.wgsl")
+            )
+            .into(),
+        ),
+    });
+    for fragment in ["defaultPS", "ghostPS", "alphatestPS", "decalPS", "vehiclePS"] {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            cache: None,
+            label: Some(fragment),
+            layout: None,
+            vertex: wgpu::VertexState {
+                compilation_options: Default::default(),
+                module: &shader,
+                entry_point: Some("defaultVS"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &VERTEX_ATTRIBUTES,
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                compilation_options: Default::default(),
+                module: &shader,
+                entry_point: Some(fragment),
+                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+        });
+    }
+    let error = pollster::block_on(error_scope.pop());
+    assert!(error.is_none(), "{error:?}");
+}
 /// `WorldShadow_MatRow[0..3]`.
 
 /// Which original effect a DMO mesh draws with (the material's `effect`).
@@ -89,6 +143,9 @@ pub(crate) enum DynamicObjectEffect {
     Default,
     /// `alphatestdynamicobject` (`material_dynamicobject/alphatest`).
     AlphaTest,
+    /// A Skate 3 park piece's `environmentpark.decal` material: `dynamicobject` with its
+    /// CLAMP decal (UV0.zw, uploaded in the UV1 lanes) laid over the diffuse.
+    Decal,
     Vehicle,
     VehicleGlass,
     VehicleLight,
@@ -276,6 +333,8 @@ pub(super) struct DynamicObjectPipelines {
     cube_sampler: wgpu::Sampler,
     default: wgpu::RenderPipeline,
     alpha_test: wgpu::RenderPipeline,
+    decal: wgpu::RenderPipeline,
+    decal_sampler: wgpu::Sampler,
     ghost: [wgpu::RenderPipeline; 2],
     vehicle: wgpu::RenderPipeline,
     vehicle_glass: wgpu::RenderPipeline,
@@ -354,6 +413,8 @@ impl DynamicObjectPipelines {
                 sampler_entry(5),
                 sampler_entry(6),
                 uniform_entry(7, wgpu::ShaderStages::FRAGMENT),
+                texture_entry(8, D2),
+                sampler_entry(9),
             ],
         });
         // Bindings 2 and 3 are COMMON's `shadow_csm0` and `shadow_sampler`.
@@ -375,6 +436,18 @@ impl DynamicObjectPipelines {
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 16,
+            ..Default::default()
+        });
+        // decalenvironment's decal sampler: the diffuse family's filtering with CLAMP.
+        let decal_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("park piece decal clamp"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
@@ -548,6 +621,8 @@ impl DynamicObjectPipelines {
             // ALPHATEST GREATEREQUAL 30 (in `alphatestPS`), ZWRITEENABLE,
             // no blend.
             alpha_test: pipeline("alphatestPS", wgpu::ColorWrites::COLOR, false),
+            decal: pipeline("decalPS", wgpu::ColorWrites::ALL, false),
+            decal_sampler,
             vehicle: pipeline("vehiclePS", wgpu::ColorWrites::ALL, false),
             vehicle_glass: pipeline("vehicleGlassPS", wgpu::ColorWrites::COLOR, true),
             vehicle_light: pipeline("vehicleLightPS", wgpu::ColorWrites::ALL, false),
@@ -571,13 +646,15 @@ impl DynamicObjectPipelines {
 
     /// One material: `i_diffuse`, `i_specular`, `i_normal`, `i_detail` and
     /// the `i_environment` cube, `m_params[0..2]` and the
-    /// `detailNormalUVScale` instance scalar.
+    /// `detailNormalUVScale` instance scalar, and a `Decal` material's decal
+    /// (any other binds its diffuse there, unsampled).
     pub(super) fn material(
         &self,
         device: &wgpu::Device,
         textures: [&GpuTexture; 5],
         m_params: [[f32; 4]; 8],
         detail_normal_uv_scale: [f32; 4],
+        decal: Option<&GpuTexture>,
     ) -> RenderResult<wgpu::BindGroup> {
         for (index, texture) in textures.iter().enumerate() {
             if texture.cube != (index == 4) {
@@ -619,6 +696,14 @@ impl DynamicObjectPipelines {
             binding: 7,
             resource: constants.as_entire_binding(),
         });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 8,
+            resource: wgpu::BindingResource::TextureView(&decal.unwrap_or(textures[0]).view),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 9,
+            resource: wgpu::BindingResource::Sampler(&self.decal_sampler),
+        });
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("original dynamicobject material"),
             layout: &self.material_layout,
@@ -628,8 +713,9 @@ impl DynamicObjectPipelines {
 
     fn technique(&self, effect: DynamicObjectEffect, ghosted: bool) -> &[wgpu::RenderPipeline] {
         match effect {
-            DynamicObjectEffect::Default if ghosted => &self.ghost,
+            DynamicObjectEffect::Default | DynamicObjectEffect::Decal if ghosted => &self.ghost,
             DynamicObjectEffect::Default => std::slice::from_ref(&self.default),
+            DynamicObjectEffect::Decal => std::slice::from_ref(&self.decal),
             // SetCurrentEffect82e1c210 falls back to default: this effect's
             // shipped manifest has no ghost technique and ignores opacity.
             DynamicObjectEffect::AlphaTest => std::slice::from_ref(&self.alpha_test),
@@ -657,7 +743,7 @@ impl DynamicObjectPipelines {
     ) {
         let mesh = &draw.object.model.meshes[index];
         pass.set_pipeline(&self.technique(mesh.effect, draw.ghosted)[technique_pass]);
-        if draw.ghosted && mesh.effect == DynamicObjectEffect::Default {
+        if draw.ghosted && matches!(mesh.effect, DynamicObjectEffect::Default | DynamicObjectEffect::Decal) {
             pass.set_stencil_reference(255);
         }
         if draw.vehicle.is_some() {
@@ -752,6 +838,22 @@ pub(super) fn upload_model(
                 | DynamicObjectEffect::VehicleLight
         );
         let mut extra = vec![[0.; 3]; geometry.positions.len()];
+        if input.effect == DynamicObjectEffect::Decal {
+            let decal = geometry
+                .attributes
+                .iter()
+                .find(|a| a.semantic == VertexSemantic::TextureCoordinate(1))
+                .ok_or("decal UV absent")?;
+            let NativeVertexAttributeValues::Float2(decal) = &decal.values else {
+                return Err("decal UV is not float2".into());
+            };
+            if decal.len() != extra.len() {
+                return Err("decal UV count".into());
+            }
+            for (row, uv) in extra.iter_mut().zip(decal) {
+                row[..2].copy_from_slice(uv);
+            }
+        }
         if vehicle {
             let indices = geometry
                 .attributes
@@ -970,6 +1072,8 @@ const DYNAMIC_OBJECT: &str = r"
 @group(1) @binding(6) var cube_sampler: sampler;
 struct Material { m_params: array<vec4<f32>, 8>, detail_normal_uv_scale: vec4<f32> }
 @group(1) @binding(7) var<uniform> material: Material;
+@group(1) @binding(8) var i_decal: texture_2d<f32>;
+@group(1) @binding(9) var decal_sampler: sampler;
 @group(2) @binding(4) var shadow_world: texture_2d<f32>;
 @group(2) @binding(5) var world_sampler: sampler;
 struct WorldShadow { rows: array<vec4<f32>, 3> }
@@ -984,6 +1088,8 @@ struct PsIn {
     // vPos relative to g_vViewPos.
     @location(4) relative: vec3<f32>,
     @location(5) fog: vec4<f32>,
+    // A park piece decal's UV (the UV1 lanes).
+    @location(6) decal: vec2<f32>,
 }
 
 // dynamicobject_defaultVS.vpo pc 16-21: mul(v, partMatrix) as
@@ -1011,6 +1117,7 @@ fn part_vector(v: vec3<f32>) -> vec3<f32> {
     output.binormal = part_vector(binormal);
     output.normal = cross(output.tangent, output.binormal);
     output.uv = uv;
+    output.decal = uv1;
     if object.i_params.y != 0.0 {
         let i = u32(bone)*3u;
         output.tangent = vec3<f32>(dot(tangent,object.bones[i].xyz),dot(tangent,object.bones[i+1u].xyz),dot(tangent,object.bones[i+2u].xyz));
@@ -1097,6 +1204,11 @@ fn dynamic_object_specular(
 // has the same math) through PS_Fog_Bloom_Tone; alpha is the diffuse alpha.
 fn dynamic_object_lit(input: PsIn) -> vec4<f32> {
     let diffuse = textureSample(i_diffuse, wrap_sampler, input.uv);
+    return dynamic_object_lit_surface(input, diffuse.rgb * diffuse.rgb, diffuse.a);
+}
+
+// The lighting above over a given linear surface colour.
+fn dynamic_object_lit_surface(input: PsIn, surface: vec3<f32>, alpha: f32) -> vec4<f32> {
     let masks = textureSample(i_specular, wrap_sampler, input.uv).xyz;
     let detail = 2.0 * textureSample(i_detail, wrap_sampler, input.uv * material.detail_normal_uv_scale.x).xyz - 1.0;
     let tangent_normal = 2.0 * textureSample(i_normal, wrap_sampler, input.uv).xyz - 1.0;
@@ -1123,9 +1235,19 @@ fn dynamic_object_lit(input: PsIn) -> vec4<f32> {
         + vec3<f32>(0.1, 0.1, 0.2);
     let diff_term = lighting * kd;
     let spec_term = dynamic_object_specular(light, world_normal, view_dir, masks, shadow);
-    let out_colour = vec4<f32>(diff_term * (diffuse.rgb * diffuse.rgb) + spec_term, 1.0);
+    let out_colour = vec4<f32>(diff_term * surface + spec_term, 1.0);
     let tone = fog_bloom_tone(out_colour * material.m_params[0].y, input.fog, globals.envattributes2.x);
-    return vec4<f32>(tone.rgb, diffuse.a);
+    return vec4<f32>(tone.rgb, alpha);
+}
+
+// defaultPS with environment_textures.fxh GetDecalTexture/ApplyDecal (as decalenvironment
+// uses them): the squared decal over the squared diffuse by the decal's alpha.
+@fragment fn decalPS(input: PsIn) -> @location(0) vec4<f32> {
+    let diffuse = textureSample(i_diffuse, wrap_sampler, input.uv);
+    let decal = textureSample(i_decal, decal_sampler, input.decal);
+    let surface = mix(diffuse.rgb * diffuse.rgb, decal.rgb * decal.rgb, vec3<f32>(decal.a));
+    let lit = dynamic_object_lit_surface(input, surface, diffuse.a);
+    return vec4<f32>(lit.rgb, object.i_params.x);
 }
 
 // dynamicobject.fx:56: the returned alpha is i_params[0].x.

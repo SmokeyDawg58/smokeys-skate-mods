@@ -67,7 +67,17 @@ impl Field {
                 if ax<0||az<0||ax>=size as i32||az>=size as i32 {continue;}
                 let index=az as usize*size+ax as usize;let y=num(8+(z*GRID+x)*4);
                 if !y.is_finite(){continue;}
-                if ground[index].valid {compared+=1;if (ground[index].height-y).abs()<0.28 {matches+=1;}else {continue;}}
+                if ground[index].valid {
+                    compared+=1;
+                    if (ground[index].height-y).abs()<0.28 {matches+=1;}
+                    // The Community Pool's small diving board may be the
+                    // uppermost sampled surface over its verified pool floor.
+                    // Keep the original board for rendering/collision/cover;
+                    // only the pool's water solver uses the known floor here.
+                    else if pool==2 && ground[index].height>y && ground[index].height-y<4. {
+                        samples.push((index,y));
+                    } else {continue;}
+                }
                 else {samples.push((index,y));}
                 all_samples.push((index,y));
                 if (point[0]-center[0]).powi(2)+(point[1]-center[1]).powi(2)<100. {inner_heights.push(y); }
@@ -76,6 +86,12 @@ impl Field {
             // transferring water to another floor, custom map or stale stream.
             if compared<64 || matches*100<compared*85 || inner_heights.len()<64 {continue;}
             for (i,y) in samples {augmented[i]=Ground{height:y,valid:true,exposed:true};included[i]=true;changed=true;}
+            // Its verified floor is open to the surrounding sky. A narrow
+            // board may block individual vertical samples, but water flows
+            // underneath it from the rest of the pool.
+            if pool==2 {for &(i,_) in &all_samples {
+                if augmented[i].valid && !augmented[i].exposed {augmented[i].exposed=true;included[i]=true;changed=true;}
+            }}
             // A pool collects a shallow sheet at its lowest verified floor.
             // The percentile rejects isolated lower-level triangles. Four levels
             // correspond to light, medium, heavy and the after-rain setting.
@@ -102,7 +118,8 @@ impl Field {
                 let x=origin[0]+(i%size)as f32*step;let z=origin[1]+(i/size)as f32*step;
                 (x-c[0]).powi(2)+(z-c[1]).powi(2)<=radius.powi(2)
             });
-            if !already_wet && (included[i]||pool_area) && proposed.valid>0.5 && proposed.levels.iter().any(|h|*h>proposed.bed+0.002) {
+            let board_replaced=included[i] && old.valid>0.5 && (old.ground-proposed.ground)>0.28;
+            if (!already_wet || board_replaced) && (included[i]||pool_area) && proposed.valid>0.5 && proposed.levels.iter().any(|h|*h>proposed.bed+0.002) {
                 original.cells[i]=proposed;
             }
         }
@@ -424,6 +441,28 @@ impl Manager {
         let original=Field::solve(origin,0.5,n,ground.clone(),true);
         let result=Field::solve_named_pools(origin,0.5,n,ground);
         assert_eq!(original.bytes(),result.bytes(),"a different floor must not use stored pool geometry");
+    }
+    #[test]fn community_pool_uses_verified_floor_under_a_diving_board(){
+        let n=257;let origin=[1187.,-711.];let step=0.5;
+        let data=include_bytes!(concat!(env!("OUT_DIR"), "/pool-ground.bin"));let record_size=8+73*73*4;
+        let record=&data[2*record_size..3*record_size];
+        let number=|at:usize|f32::from_le_bytes(record[at..at+4].try_into().unwrap());
+        let base=[number(0),number(4)];let mut ground=vec![Ground::default();n*n];
+        let mut board=None;
+        for z in 0..73 {for x in 0..73 {
+            let y=number(8+(z*73+x)*4);if !y.is_finite(){continue;}
+            let px=base[0]+x as f32*step;let pz=base[1]+z as f32*step;
+            let ix=((px-origin[0])/step).round() as usize;let iz=((pz-origin[1])/step).round() as usize;
+            if ix>=n||iz>=n {continue;}
+            let i=iz*n+ix;ground[i]=Ground{height:y,valid:true,exposed:true};
+            if (px-1251.3).abs()<4. && (pz+647.2).abs()<4.
+                && board.is_none_or(|(_,best)|y<best) {board=Some((i,y));}
+        }}
+        let (i,floor)=board.expect("community pool centre in recorded floor");
+        ground[i].height=floor+1.;ground[i].exposed=false;
+        let field=Field::solve_named_pools(origin,step,n,ground);
+        assert!((field.cells[i].ground-floor).abs()<0.001,"board must not become the pool floor");
+        assert!(field.cells[i].levels[2]>floor+0.002,"water should extend under the board");
     }
     #[test]fn flat_terrain_has_small_pockets_without_flooding_every_cell(){
         let n=65;let f=Field::solve([0.,0.],0.5,n,vec![Ground{height:0.,valid:true,exposed:true};n*n],true);

@@ -126,7 +126,7 @@ pub(crate) fn initialize()->Result<(),String>{let _=crate::weather::current()?;l
 pub(crate) struct Voice { at:usize,light:f32,heavy:f32,birds:Birds,thunder:Thunder }
 impl Voice {
     pub fn mix(&mut self,block:&mut [f32],sfx:f32,paused:bool) {
-        let mode=crate::weather::current().unwrap_or(crate::weather::Mode::Clear);
+        let mode=crate::weather::render_mode().unwrap_or(crate::weather::Mode::Clear);
         let active=!paused&&crate::weather::visible();
         let sfx=sfx*crate::weather::rain_volume().unwrap_or(0.);
         self.birds.mix(block,sfx,active&&mode==crate::weather::Mode::AfterRain);

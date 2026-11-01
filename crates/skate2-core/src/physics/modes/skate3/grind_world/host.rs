@@ -9,10 +9,31 @@ use skate3_core::physics::grind_contact::Primitive;
 
 impl StaticProvider {
     pub(crate) fn from_host(host: &[HostGrindAsset]) -> Result<Self, String> {
-        let mut result = Self {
+        Self::with_host(&Self::from_host_empty(), host)
+    }
+
+    fn from_host_empty() -> Self {
+        Self {
             primitives: Vec::new(),
             metadata: Vec::new(),
             assets: Vec::new(),
+            #[cfg(any())]
+            rail_guids: Vec::new(),
+            #[cfg(any())]
+            source_for_primitive: Vec::new(),
+            #[cfg(any())]
+            source_rail_indices: Vec::new(),
+        }
+    }
+
+    /// `base` with `host`'s assets after its own, as `from_host` of both lists would build:
+    /// `base`'s assets (their octrees) are shared, not built again. The PC park editor's props
+    /// and boards move often; the city under them does not.
+    pub(crate) fn with_host(base: &Self, host: &[HostGrindAsset]) -> Result<Self, String> {
+        let mut result = Self {
+            primitives: base.primitives.clone(),
+            metadata: base.metadata.clone(),
+            assets: base.assets.clone(),
             #[cfg(any())]
             rail_guids: Vec::new(),
             #[cfg(any())]
@@ -77,13 +98,13 @@ impl StaticProvider {
                 .expect("nonempty")
                 .padded();
             let tree = Octree::new(asset_bounds, bounds)?;
-            result.assets.push(Asset {
+            result.assets.push(std::sync::Arc::new(Asset {
                 bounds: asset_bounds,
                 indices,
                 tree,
                 #[cfg(any())]
                 source: None,
-            });
+            }));
         }
         Ok(result)
     }

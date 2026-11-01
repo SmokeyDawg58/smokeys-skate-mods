@@ -20,11 +20,32 @@ pub enum PauseMenuOption {
     SaveReplay = 13,
     /// Leave Challenge (PC port addition).
     LeaveChallenge = 14,
+    /// Direct access to mod settings (PC port addition).
+    Mods = 15,
 }
 
 #[cfg(test)]
 mod quit_tests {
     use super::*;
+    #[test]
+    fn mods_precedes_quit_and_is_enabled_in_each_hub_that_has_quit() {
+        for hub in [StartHub::SinglePlayer, StartHub::SinglePlayerChallenge, StartHub::OfflineFreeSkate,
+            StartHub::PartyPlay, StartHub::CreateASpotSetup, StartHub::OnlineFreeSkate, StartHub::OnlineChallenge] {
+            let snapshot = PauseMenuSnapshot { hub, ..Default::default() };
+            let rows = snapshot.options();
+            let quit = rows.iter().position(|row| *row == PauseMenuOption::Quit).unwrap();
+            assert_eq!(rows[quit - 1], PauseMenuOption::Mods, "{hub:?}");
+            assert!(snapshot.item_enabled(PauseMenuOption::Mods), "{hub:?}");
+        }
+    }
+    #[test]
+    fn mods_remains_available_in_create_a_spot_hubs_without_quit() {
+        for hub in [StartHub::CreateASpot, StartHub::CreateASpotSetupWithScore] {
+            let snapshot = PauseMenuSnapshot { hub, ..Default::default() };
+            assert_eq!(snapshot.options().last(), Some(&PauseMenuOption::Mods));
+            assert!(snapshot.item_enabled(PauseMenuOption::Mods));
+        }
+    }
     #[test]
     fn quit_confirmation_defaults_to_no_and_requires_yes() {
         let mut menu=PauseMenuController::default();
@@ -121,10 +142,12 @@ mod quit_tests {
     fn leave_challenge_sits_above_quit_game_while_the_round_runs() {
         let mut menu=PauseMenuController::default();
         menu.set_hub(StartHub::OnlineChallenge);
-        assert_eq!(menu.options(),[PauseMenuOption::Settings,PauseMenuOption::LeaveChallenge,PauseMenuOption::Quit]);
-        // A finished round offers no Leave Challenge: down goes from Settings to Quit Game.
+        assert_eq!(menu.options(),[PauseMenuOption::Settings,PauseMenuOption::LeaveChallenge,PauseMenuOption::Mods,PauseMenuOption::Quit]);
+        // A finished round skips Leave Challenge, then offers Mods and Quit Game.
         menu.update(PauseMenuInput{start:true,..Default::default()},true);
         menu.acknowledge_intro();
+        menu.update(PauseMenuInput{down:true,..Default::default()},true);
+        assert_eq!(menu.selected_option(),PauseMenuOption::Mods);
         menu.update(PauseMenuInput{down:true,..Default::default()},true);
         assert_eq!(menu.selected_option(),PauseMenuOption::Quit);
         menu.update(PauseMenuInput{start:true,..Default::default()},true);
@@ -154,7 +177,7 @@ mod quit_tests {
     fn edit_skater_sits_above_game_settings_while_the_online_game_offers_it() {
         let mut menu=PauseMenuController::default();
         menu.set_hub(StartHub::OnlineFreeSkate);
-        assert_eq!(menu.options(),[PauseMenuOption::SaveReplay,PauseMenuOption::EditSkater,PauseMenuOption::Settings,PauseMenuOption::Quit]);
+        assert_eq!(menu.options(),[PauseMenuOption::SaveReplay,PauseMenuOption::EditSkater,PauseMenuOption::Settings,PauseMenuOption::Mods,PauseMenuOption::Quit]);
         // Not offered (a round loading, a travel): the hub opens on Game Settings and up wraps
         // past both disabled rows to Quit Game.
         menu.update(PauseMenuInput{start:true,..Default::default()},true);
@@ -187,6 +210,7 @@ impl PauseMenuOption {
             Self::EditSkater => "ID_START_HUB_EDIT_SKATER",
             Self::TrickGuide => "ID_START_HUB_TRICK_GUIDE",
             Self::Settings => "ID_START_HUB_GAME_SETTINGS",
+            Self::Mods => "#Mods",
             Self::Quit => "ID_START_HUB_QUIT_GAME",
             Self::QuitCreateASpot => "ID_START_HUB_QUIT_CAS",
             Self::CreateASpotSpotInfo => "ID_CREATEASPOT_RETURN_TO_SPOT_INFO",
@@ -219,7 +243,7 @@ impl PauseMenuOption {
 
 /// SinglePlayer::m_eMenuOptions8208e248 (GetOption82644370) without the debug build's first
 /// row, Debug (`ID_START_HUB_DEBUG_MENU`), which a retail hub does not offer.
-pub const SINGLE_PLAYER_OPTIONS: [PauseMenuOption; 8] = [
+pub const SINGLE_PLAYER_OPTIONS: [PauseMenuOption; 9] = [
     PauseMenuOption::Replay,
     PauseMenuOption::Map,
     PauseMenuOption::Profile,
@@ -227,6 +251,7 @@ pub const SINGLE_PLAYER_OPTIONS: [PauseMenuOption; 8] = [
     PauseMenuOption::EditSkater,
     PauseMenuOption::TrickGuide,
     PauseMenuOption::Settings,
+    PauseMenuOption::Mods,
     PauseMenuOption::Quit,
 ];
 
@@ -234,75 +259,81 @@ pub const SINGLE_PLAYER_OPTIONS: [PauseMenuOption; 8] = [
 /// `OnIntroDone`82653918 picks in a free-skate game mode. Its IsItemEnabled826444e0
 /// enables Replay only with mbReplayAvailable, as SinglePlayer's does. Its debug Debug row is
 /// left out.
-pub const OFFLINE_FREESKATE_OPTIONS: [PauseMenuOption; 5] = [
+pub const OFFLINE_FREESKATE_OPTIONS: [PauseMenuOption; 6] = [
     PauseMenuOption::Replay,
     PauseMenuOption::Map,
     PauseMenuOption::TrickGuide,
     PauseMenuOption::Settings,
+    PauseMenuOption::Mods,
     PauseMenuOption::Quit,
 ];
 
 /// PartyPlay::m_eMenuOptions8208e2cc (GetOption82644400), the hub `OnIntroDone`82653918
 /// picks in Party Play. Its IsItemEnabled82644570 enables Replay only with mbReplayAvailable.
 /// Its debug Debug row is left out.
-pub const PARTY_PLAY_OPTIONS: [PauseMenuOption; 5] = [
+pub const PARTY_PLAY_OPTIONS: [PauseMenuOption; 6] = [
     PauseMenuOption::RestartChallenge,
     PauseMenuOption::Replay,
     PauseMenuOption::TrickGuide,
     PauseMenuOption::Settings,
+    PauseMenuOption::Mods,
     PauseMenuOption::Quit,
 ];
 
 /// `StartHubState_SinglePlayer_Challenge::m_eMenuOptions` (`0x8208e26c`, eight rows from
 /// `GetNumOptions`), the single-player hub while a main challenge runs. Its debug Debug row is
 /// left out.
-pub const SINGLE_PLAYER_CHALLENGE_OPTIONS: [PauseMenuOption; 7] = [
+pub const SINGLE_PLAYER_CHALLENGE_OPTIONS: [PauseMenuOption; 8] = [
     PauseMenuOption::RestartChallenge,
     PauseMenuOption::QuitChallenge,
     PauseMenuOption::Replay,
     PauseMenuOption::Profile,
     PauseMenuOption::TrickGuide,
     PauseMenuOption::Settings,
+    PauseMenuOption::Mods,
     PauseMenuOption::Quit,
 ];
 
 /// `StartHubState_Create_A_Spot::m_eMenuOptions` (`0x8208e28c`, five rows), during a
 /// Create-a-Spot challenge (type 35). Its debug Debug row is left out.
-pub const CREATE_A_SPOT_OPTIONS: [PauseMenuOption; 4] = [
+pub const CREATE_A_SPOT_OPTIONS: [PauseMenuOption; 5] = [
     PauseMenuOption::CreateASpotSpotInfo,
     PauseMenuOption::Replay,
     PauseMenuOption::TrickGuide,
     PauseMenuOption::Settings,
+    PauseMenuOption::Mods,
 ];
 
 /// `StartHubState_Create_A_Spot_Setup::m_eMenuOptions` (`0x8208e2a0`, six rows). Its debug Debug
 /// row is left out.
-pub const CREATE_A_SPOT_SETUP_OPTIONS: [PauseMenuOption; 5] = [
+pub const CREATE_A_SPOT_SETUP_OPTIONS: [PauseMenuOption; 6] = [
     PauseMenuOption::QuitCreateASpot,
     PauseMenuOption::Replay,
     PauseMenuOption::TrickGuide,
     PauseMenuOption::Settings,
+    PauseMenuOption::Mods,
     PauseMenuOption::Quit,
 ];
 
 /// `StartHubState_Create_A_Spot_Setup_WithScore::m_eMenuOptions` (`0x8208e2b8`, five rows),
 /// during a Create-a-Spot setup challenge (type 36). Its debug Debug row is left out.
-pub const CREATE_A_SPOT_SETUP_WITH_SCORE_OPTIONS: [PauseMenuOption; 4] = [
+pub const CREATE_A_SPOT_SETUP_WITH_SCORE_OPTIONS: [PauseMenuOption; 5] = [
     PauseMenuOption::CreateASpotSpotInfo,
     PauseMenuOption::Replay,
     PauseMenuOption::TrickGuide,
     PauseMenuOption::Settings,
+    PauseMenuOption::Mods,
 ];
 
 /// `StartHubState_Online_FreeSkate::m_eMenuOptions` (`0x8208e2e4`, four rows). Its debug Debug
 /// row is left out; Edit Skater above Game Settings is a PC port addition.
-pub const ONLINE_FREESKATE_OPTIONS: [PauseMenuOption; 4] =
-    [PauseMenuOption::SaveReplay, PauseMenuOption::EditSkater, PauseMenuOption::Settings, PauseMenuOption::Quit];
+pub const ONLINE_FREESKATE_OPTIONS: [PauseMenuOption; 5] =
+    [PauseMenuOption::SaveReplay, PauseMenuOption::EditSkater, PauseMenuOption::Settings, PauseMenuOption::Mods, PauseMenuOption::Quit];
 
 /// `StartHubState_Online_Challenge::m_eMenuOptions` (`0x8208e2f4`, three rows). Its debug Debug
 /// row is left out; Leave Challenge above Quit Game is a PC port addition.
-pub const ONLINE_CHALLENGE_OPTIONS: [PauseMenuOption; 3] =
-    [PauseMenuOption::Settings, PauseMenuOption::LeaveChallenge, PauseMenuOption::Quit];
+pub const ONLINE_CHALLENGE_OPTIONS: [PauseMenuOption; 4] =
+    [PauseMenuOption::Settings, PauseMenuOption::LeaveChallenge, PauseMenuOption::Mods, PauseMenuOption::Quit];
 
 /// The main challenge as the hub reads it (`cActivityManager::GetMainChallenge`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -498,6 +529,7 @@ impl PauseMenuSnapshot {
     #[must_use]
     pub fn item_enabled(self, option: PauseMenuOption) -> bool {
         use PauseMenuOption as O;
+        if option == O::Mods { return self.options().contains(&O::Mods); }
         if option==O::Replay {
             return self.replay_available && matches!(self.hub,StartHub::SinglePlayer|StartHub::SinglePlayerChallenge|StartHub::OfflineFreeSkate|StartHub::PartyPlay);
         }

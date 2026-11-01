@@ -4121,7 +4121,7 @@ impl<T, C> SelectedLiveSession<T, C> {
         Ok(())
     }
 
-    fn teleport_local_player(&mut self, transform: [f32; 16]) -> Result<(), SelectedLiveError> {
+    pub(super) fn teleport_local_player(&mut self, transform: [f32; 16]) -> Result<(), SelectedLiveError> {
         let input = self.inner.bound_input.as_ref().ok_or_else(|| error("career input absent"))?;
         let player = &self.inner.player.as_ref().ok_or_else(|| error("career player absent"))?.selected;
         let regular = player.owners.services.settings.try_stance_byte(input.player_index()).map_err(error)?;

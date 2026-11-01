@@ -187,6 +187,19 @@ impl AssemblyGroundTriangleRipper {
         }
     }
 
+    /// PC park editor: prebuilt world triangles (placed mission props) under the same world
+    /// predicate and through the same cache as ripped mesh units.
+    pub(super) fn rip_host_triangles<I>(&mut self, triangles: &[AssemblyGroundTriangle], run_intersections: &mut I)
+    where
+        I: for<'a> FnMut(AssemblyGroundTriangleBatch<'a, AssemblyGroundTriangle>),
+    {
+        for triangle in triangles {
+            if triangle_aabb_overlap(self.world_minimum, self.world_maximum, triangle.primitive().points) {
+                self.cache.accept_triangle(*triangle, |_| {}, &mut *run_intersections);
+            }
+        }
+    }
+
     pub(super) fn finish<I>(self, run_intersections: I)
     where
         I: for<'a> FnOnce(AssemblyGroundTriangleBatch<'a, AssemblyGroundTriangle>),

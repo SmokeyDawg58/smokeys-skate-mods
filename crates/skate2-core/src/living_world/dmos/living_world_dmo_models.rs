@@ -551,7 +551,11 @@ fn try_create_model(
     if meshes == 0 {
         return Err(DmoModelError::UnportedFallback { model_id });
     }
-    if meshes != u32::MAX {
+    // A mesh-table CModel builds its own one-Part Definition with `PartDefinition` defaults
+    // and no ApplyAttribulatorOffsets. Only the Skate 3 prop loader supplies that Definition
+    // (`ui::object_dropper::add_procedural_assembly`), as the arena's only Assembly.
+    let procedural = meshes != u32::MAX;
+    if procedural && (meshes != 1 || asset.only_serialised_assembly().is_none()) {
         return Err(DmoModelError::UnportedProceduralParts { model_id, meshes });
     }
     if r_model.len() < 0x20 {
@@ -578,15 +582,21 @@ fn try_create_model(
     let bbox_max = read_vec4(r_model, 0x10);
     // lvx/vsubfp: all four lanes, SetDimensions retains W too.
     let dimensions = std::array::from_fn(|lane| bbox_max[lane] - bbox_min[lane]);
-    let assembly_object_id = ObjectId(read_u32(c_model, 0x08));
-    let (_, template) = asset
-        .try_serialised_assembly_by_object_id(assembly_object_id)
-        .map_err(|error| match error {
-            DmoSerialisedAssemblySelectError::Missing { .. } => {
-                DmoModelError::UnportedSphereDefinition { model_id }
-            }
-            other => DmoModelError::Assembly(other),
-        })?;
+    let template = match asset.only_serialised_assembly() {
+        Some(template) if procedural => template,
+        _ => {
+            asset
+                .try_serialised_assembly_by_object_id(ObjectId(read_u32(c_model, 0x08)))
+                .map_err(|error| match error {
+                    DmoSerialisedAssemblySelectError::Missing { .. } => {
+                        DmoModelError::UnportedSphereDefinition { model_id }
+                    }
+                    other => DmoModelError::Assembly(other),
+                })?
+                .1
+        }
+    };
+    let assembly_object_id = template.assembly_object_id();
     if template.parts().len() != 1 {
         return Err(DmoModelError::PartCount {
             model_id,
@@ -594,14 +604,24 @@ fn try_create_model(
         });
     }
     let layout = CharacteristicsLayout::try_read(&characteristics)?;
-    let part = apply_attribulator_offsets(
-        &template.parts()[0],
-        &characteristics,
-        &layout,
-        bbox_min,
-        bbox_max,
-        numeric,
-    )?;
+    let part = if procedural {
+        let part = &template.parts()[0];
+        SerialisedAssemblyLivingWorldPart {
+            inertia: part.inertia,
+            inverse_body_transform: part.inverse_body_transform,
+            has_inverse_body_transform: part.has_inverse_body_transform,
+            material: part.material,
+        }
+    } else {
+        apply_attribulator_offsets(
+            &template.parts()[0],
+            &characteristics,
+            &layout,
+            bbox_min,
+            bbox_max,
+            numeric,
+        )?
+    };
     let owner = Arc::clone(template.owner());
     let culling_table =
         SerialisedAssemblyCullingTableSource::living_world_model(owner, culling_table);

@@ -1074,7 +1074,7 @@ pub(crate) struct GpuMap {
 
 impl GpuMap {
     pub(super) fn weather_frame(&self,eye:Option<&super::stereoscopy::Eye>)->RenderResult<Option<super::weather::Frame>> {
-        let mode=crate::weather::current()?;
+        let mode=crate::weather::render_mode()?;
         if mode==crate::weather::Mode::Clear {return Ok(None);}
         Ok(Some(super::weather::Frame {clip:eye.map_or(self.clip_from_world,|e|e.clip),camera:self.camera(),axes:self.frame.camera_axes,
             clock:self.frame.animation_time[0],fog:self.frame.fog_colour,mode}))

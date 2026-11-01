@@ -33,6 +33,7 @@ pub(crate) struct CameraRuntime {
     pub manual_cam_settings: ManualCamSettings,
     /// Stock camera graph `IsCameraTypeActive` value: 0 Low, 1 High (camera/angle.rs).
     camera_type: u32,
+    invert_look: [bool; 2],
     /// `CameraAngleSettings` generation whose shot tunings are applied (0 = none yet).
     tuning_generation: u64,
     /// Reload the current shot tree once, after the shot tunings changed.
@@ -70,6 +71,7 @@ impl CameraRuntime {
             manual_cam: ManualCam::default(),
             manual_cam_settings: settings::manual_cam_settings(&data)?,
             camera_type: super::angle::CameraAngle::default().graph_type(),
+            invert_look: [false; 2],
             tuning_generation: 0, reselect_shot: false })
     }
 
@@ -99,6 +101,8 @@ impl CameraRuntime {
     /// The graph re-evaluates `IsCameraTypeActive` on its next update and switches branch
     /// through its own shot transitions.
     pub fn set_camera_type(&mut self, value: u32) { self.camera_type = value; }
+    pub(crate) fn invert_look(&self) -> [bool; 2] { self.invert_look }
+    pub(crate) fn set_invert_look(&mut self, value: [bool; 2]) { self.invert_look = value; }
 
     pub fn has_shot(&self, name: &str) -> bool { self.shots.contains(name) }
     pub fn tuning_generation(&self) -> u64 { self.tuning_generation }

@@ -27,7 +27,8 @@ pub(crate) struct StaticProvider {
     metadata: Vec<spline::PrimitiveMetadata>,
     #[cfg(any())]
     rail_guids: Vec<[u64; 2]>,
-    assets: Vec<Asset>,
+    /// Shared: a provider extended from another (`with_host`) keeps its assets' trees.
+    assets: Vec<std::sync::Arc<Asset>>,
     #[cfg(any())]
     source_for_primitive: Vec<usize>,
     #[cfg(any())]
@@ -113,7 +114,7 @@ impl StaticProvider {
             let bounds = indices.iter().map(|&i| spatial_bounds[i]).reduce(Bounds::union)
                 .ok_or("Empty stock grind source section")?.padded();
             let tree = Octree::new(bounds, indices.iter().map(|&i| spatial_bounds[i]).collect())?;
-            Ok(Asset { #[cfg(any())] source: Some(_source), bounds, indices, tree })
+            Ok(std::sync::Arc::new(Asset { #[cfg(any())] source: Some(_source), bounds, indices, tree }))
         }).collect::<Result<_, String>>()?;
         Ok(Self { primitives, metadata, #[cfg(any())] rail_guids, assets, #[cfg(any())] source_for_primitive, #[cfg(any())] source_rail_indices })
     }
@@ -134,12 +135,12 @@ impl StaticProvider {
         }).collect();
         let assets = if let Some(bounds) = authored_bounds.iter().copied().reduce(Bounds::union) {
             let bounds = bounds.padded();
-            vec![Asset {
+            vec![std::sync::Arc::new(Asset {
                 #[cfg(any())]
                 source: Some(SourceIdentity { stream_file: String::new(), asset_id: "host-authored".into(), section_index: 0, section_offset: 0 }),
                 bounds, indices: (0..primitives.len()).collect(),
                 tree: Octree::new(bounds, authored_bounds.clone())?,
-            }]
+            })]
         } else { vec![] };
         #[cfg(any())]
         let source_rail_indices = primitives.iter().map(|p| p.owner - 1).collect();

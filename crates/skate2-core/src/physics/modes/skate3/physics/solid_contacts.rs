@@ -88,7 +88,7 @@ pub(crate) fn append_meshes(
     contacts: &mut Vec<BoardCollision>, volumes: &[BoardWorldVolume], physics: &Skate3PhysicsState,
     query: skate3_core::physics::collision::WorldContactSettings,
 ) {
-    use skate3_core::physics::board_world::{BoardWorld, VOLUME_QUERY_SCALE, VOLUME_QUERY_STEP, volume_query_bounds};
+    use skate3_core::physics::board_world::{VOLUME_QUERY_SCALE, VOLUME_QUERY_STEP, volume_query_bounds};
     let meshes = &physics.network_proxies.meshes;
     if volumes.is_empty() || meshes.is_empty() { return; }
     let padding = query.volume_padding.max(0.) + query.maximum_separating_distance.max(0.) + 0.1;
@@ -105,7 +105,8 @@ pub(crate) fn append_meshes(
                 .is_none_or(|bounds| bounds.expanded(padding).overlaps(mesh.bounds))
         });
         if !near { continue; }
-        let mut world = BoardWorld::new(mesh.triangles.triangles().to_vec());
+        // The mesh's own contact world, kept while it stays where it is (its index's).
+        let Ok(mut world) = mesh.index.world.lock() else { continue };
         contacts.extend(world.query_primitives(&relative, query, physics.retention).iter().map(|row| {
             BoardCollision { body_b: CollisionBody::Attached(*index), ..*row }
         }));

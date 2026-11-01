@@ -186,6 +186,9 @@ pub(crate) struct CityStreaming {
     sources: Option<(FocusSource, FocusSource)>,
     additional: Option<AdditionalSources>,
     pending: Option<mpsc::Receiver<Loaded>>,
+    /// PC park editor: the mission props the scene was last built with, and their cuts.
+    mission_props: Vec<(usize, [f32; 16])>,
+    mission_templates: crate::mission_prop_render::MissionPropTemplates,
 }
 
 impl CityStreaming {
@@ -203,6 +206,8 @@ impl CityStreaming {
             sources: None,
             additional: None,
             pending: None,
+            mission_props: Vec::new(),
+            mission_templates: crate::mission_prop_render::MissionPropTemplates::default(),
         }
     }
 
@@ -352,6 +357,7 @@ impl CityStreaming {
         xml_enabled: bool,
         hulls: &[HullPresentation],
         additional_world: Option<&str>,
+        mission_props: &[(usize, [f32; 16])],
     ) -> RenderResult<Option<PreparedRenderState>> {
         if let Some(pending) = &self.pending {
             match pending.try_recv() {
@@ -388,7 +394,9 @@ impl CityStreaming {
         let hulls_changed = scene.as_ref().is_some_and(|scene| {
             !scene.hulls.iter().map(|c| c.id).eq(hulls.iter().flat_map(|hull| hull.collections.iter().copied()))
         });
-        if !focus_enabled && !proxy_changed && !hulls_changed {
+        // So does a placed mission prop.
+        let placed_changed = self.mission_props.as_slice() != mission_props;
+        if !focus_enabled && !proxy_changed && !hulls_changed && !placed_changed {
             return Ok(None);
         }
         let current_scene = scene.as_mut().ok_or("city scene owner absent")?;
@@ -447,7 +455,7 @@ impl CityStreaming {
                 current_textures.stream_focus.move_to(position, false);
                 current_textures.stream_focus.reconcile(&selected_tex);
                 current_textures.focus = position;
-                if !proxy_changed && !hulls_changed {
+                if !proxy_changed && !hulls_changed && !placed_changed {
                     return Ok(None);
                 }
             }
@@ -458,6 +466,9 @@ impl CityStreaming {
         let proxy = Arc::clone(&self.proxy);
         let proxy_active = self.proxy_revision.is_some();
         let hulls = hulls.to_vec();
+        let placed = mission_props.to_vec();
+        self.mission_props = placed.clone();
+        let templates = self.mission_templates.clone();
         let (send, receive) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("city-resource-loader".into())
@@ -482,6 +493,10 @@ impl CityStreaming {
                         scene_owner.bind_resident_textures(&texture_owner);
                     }
                     if crate::hull_presentation::sync(&mut scene_owner, &mounts, &hulls)? {
+                        crate::bind_runtime_material_attributes(&mounts, &mut scene_owner)?;
+                        scene_owner.bind_resident_textures(&texture_owner);
+                    }
+                    if crate::mission_prop_render::sync(&mut scene_owner, &mounts, &templates, &placed)? {
                         crate::bind_runtime_material_attributes(&mounts, &mut scene_owner)?;
                         scene_owner.bind_resident_textures(&texture_owner);
                     }

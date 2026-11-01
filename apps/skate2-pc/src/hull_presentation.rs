@@ -54,7 +54,7 @@ pub(crate) fn sync(scene: &mut PresentationScene, mounts: &MountSet, hulls: &[Hu
 
 /// One hull collection: each asset's arena decoded as the city's presentation collections are,
 /// with the irradiance probes its table of contents registers.
-fn load_collection(mounts: &MountSet, paths: &StreamPaths, map: &CollectionMap, id: u64) -> Result<PresentationCollection, Box<dyn Error>> {
+pub(crate) fn load_collection(mounts: &MountSet, paths: &StreamPaths, map: &CollectionMap, id: u64) -> Result<PresentationCollection, Box<dyn Error>> {
     let entry = map.collections.iter().find(|entry| entry.id == id).ok_or_else(|| format!("missing hull presentation collection {id:016x}"))?;
     let xsf = mounts.read_path(&format!("{}{}.xsf", paths.collection_directory, entry.filename))?;
     let payload = xsf.get(entry.payload_offset as usize..).ok_or("hull presentation collection payload offset")?;

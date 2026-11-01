@@ -355,6 +355,18 @@ fn try_run_assembly_meshes(
             }
         }
     }
+    // PC park editor: placed mission props after the streamed meshes.
+    let host: Vec<_> = crate::static_ground_pool::mission_prop_ground()
+        .iter()
+        .flat_map(|prop| prop.triangles_near(world_minimum, world_maximum).map(|triangle| triangle.gp))
+        .collect();
+    ripper.rip_host_triangles(&host, &mut |batch| run_batch(run, output, report, &mut run_error, batch));
+    if let Some(source) = run_error.take() {
+        return Err(SimulationStaticGroundJobError::Run {
+            assembly: assembly_ordinal,
+            source,
+        });
+    }
     // Unconditional final Run, even with zero meshes or an empty triangle cache.
     ripper.finish(|batch| run_batch(run, output, report, &mut run_error, batch));
     if let Some(source) = run_error {

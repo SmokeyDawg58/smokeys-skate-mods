@@ -29,6 +29,9 @@ mod trick_guide_room;
 /// selected character objects in its object list and spawned DMOs/vehicles in
 /// the shared dynamic draw list. Vehicles use the existing character palette
 /// implementation and shared dynamic material/shadow pipelines.
+#[path = "debug_camera_render_choice.rs"]
+mod debug_camera_render_choice;
+
 pub(crate) struct LiveSkatingView {
     map: Inspection,
     lighting: crate::render_irradiance::SkaterLighting,
@@ -697,6 +700,7 @@ impl LiveSkatingView {
             nis: career.map(|career| career.nis.clone()),
             challenge_fade: career.and_then(|career| career.fade),
             result_info: career.map(|career| career.result_info).unwrap_or_default(),
+            debug_camera_override: visual.debug_camera_override,
             camera: CameraView {
                 clip_from_world: visual.provisional_clip_from_world,
                 position: visual.camera_world_position,
@@ -802,7 +806,17 @@ impl LiveSkatingView {
         tick: Option<&SelectedVisualSnapshot<'_>>,
         retained: &RetainedFrame,
     ) -> RenderResult<()> {
-        let view = restore.and_then(PresentationRestorer::camera).unwrap_or(retained.camera);
+        let restored = restore.and_then(PresentationRestorer::camera);
+        let view = debug_camera_render_choice::choose(retained.camera, restored, retained.debug_camera_override);
+        static DEBUG_CAMERA_RENDER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *DEBUG_CAMERA_RENDER.get_or_init(|| std::env::var_os("SKATE2_DIAGNOSTIC_DEBUG_CAMERA_RENDER").is_some()) && retained.simulation_tick % 30 == 0 {
+            static LAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+            if LAST.swap(retained.simulation_tick, std::sync::atomic::Ordering::Relaxed) != retained.simulation_tick {
+                let lens_scale=(view.clip_from_world[0].powi(2)+view.clip_from_world[4].powi(2)+view.clip_from_world[8].powi(2)).sqrt();
+                eprintln!("DEBUG_CAMERA_RENDER tick={} debug={} requested={:?} restored={:?} used={:?} lens_scale={}",
+                    retained.simulation_tick, retained.debug_camera_override, retained.camera.position, restored.map(|v|v.position), view.position,lens_scale);
+            }
+        }
         scene.stereo_planes=Some(view.planes);
         let local = retained.local.draw(restore);
         let party: Vec<SkaterDraw<'_>> = retained.party.iter().map(|skater| skater.draw(restore)).collect();
@@ -1115,6 +1129,9 @@ struct RestBoard {
 struct BoardCopy {
     palette: CharacterPalette,
     bindings: Vec<SelectedCharacterGpuBinding>,
+    /// The local-to-world its palette was posed for, when posed from the captured rest board:
+    /// a copy still there keeps its palette instead of cloning and repacking it every frame.
+    rested: Option<[f32; 16]>,
 }
 
 /// Column-major 4x4 matrices as the palette and physics store them (axis columns, then the
@@ -1194,6 +1211,7 @@ struct RetainedFrame {
     result_info: skate2_core::challenge::vd_results::ResultInfo,
     /// The tick's own camera, drawn until the presentation restores one.
     camera: CameraView,
+    debug_camera_override: bool,
     local: RetainedSkater,
     party: Vec<RetainedSkater>,
     shadow_skater: ShadowSkater,
@@ -1382,14 +1400,18 @@ impl LiveSkatingView {
                     bindings.push(binding);
                     scene.objects.push(object);
                 }
-                self.board_copies.push(BoardCopy { palette, bindings });
+                self.board_copies.push(BoardCopy { palette, bindings, rested: None });
             }
             return Ok(());
         }
         let mut prior = prior.into_iter();
+        let resting = self.rest_board.is_some();
         for (copy, target) in self.board_copies.iter_mut().zip(&targets) {
-            copy.palette = source.clone();
-            copy.palette.repack_for_upload(*target).map_err(|e| format!("board copy pose: {e:?}"))?;
+            if !(resting && copy.rested == Some(*target)) {
+                copy.palette = source.clone();
+                copy.palette.repack_for_upload(*target).map_err(|e| format!("board copy pose: {e:?}"))?;
+                copy.rested = resting.then_some(*target);
+            }
             let deck = copy.palette.deck_world().unwrap_or(*target);
             for binding in &copy.bindings {
                 let mut object = prior.next().ok_or("board copy object missing")?;

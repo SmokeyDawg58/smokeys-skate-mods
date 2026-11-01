@@ -231,6 +231,7 @@ impl EditSkaterRoom {
             dependencies: vec![],
             proxies: vec![],
             hulls: vec![],
+            placed: Vec::new(),
             loose: vec![PresentationCollection {
                 light_probes: Vec::new(),
                 id: u64::from(geometry.id),

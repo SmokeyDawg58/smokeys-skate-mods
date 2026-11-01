@@ -46,6 +46,26 @@ pub(crate) struct World {
     pub(crate) curves: Vec<crate::weather_puddles::Curve>,
 }
 
+/// Already transformed receiver triangles for resident render instances. The
+/// renderer replaces its streamed map regularly; unchanged instances can be
+/// reused without decoding and transforming their indexed vertices again.
+pub(crate) type ReceiverKey = (Option<String>, u64, usize, usize, usize, Option<[u32; 16]>, bool, bool);
+pub(crate) type ReceiverCache = BTreeMap<ReceiverKey, Vec<Triangle>>;
+
+pub(crate) fn add_cached_receiver(
+    world: &mut World, cache: &mut ReceiverCache, key: ReceiverKey,
+    geometry: &NativeMeshGeometry, matrix: Option<[f32; 16]>, group: u64,
+    wettable: bool, blocks_rain: bool,
+) {
+    if let Some(triangles) = cache.get(&key) {
+        world.triangles.extend(triangles.iter().map(|triangle| Triangle { group, ..*triangle }));
+    } else {
+        let start = world.triangles.len();
+        world.add_receiver_mesh(geometry, matrix, group, wettable, blocks_rain);
+        cache.insert(key, world.triangles[start..].to_vec());
+    }
+}
+
 pub(crate) fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|i| a[i] - b[i])
 }
@@ -99,6 +119,16 @@ impl World {
             .attributes
             .iter()
             .find(|a| a.semantic == VertexSemantic::Normal(0));
+        // The normal transform is constant for the whole instance. Computing
+        // its cofactors for every indexed corner made streamed map rebuilds
+        // needlessly expensive, especially in dense rain-enabled locations.
+        let normal_transform = matrix.map(|m| {
+            let a = [m[0], m[1], m[2]];
+            let b = [m[4], m[5], m[6]];
+            let c = [m[8], m[9], m[10]];
+            let det = dot(a, cross(b, c)).signum();
+            (cross(b, c), cross(c, a), cross(a, b), det)
+        });
         for draw in &geometry.draws {
             let start = draw.start_index as usize;
             let Some(indices) = geometry
@@ -138,14 +168,9 @@ impl World {
                         _ => None,
                     });
                     if let Some(n) = n {
-                        let n = matrix.map_or(n, |m| {
+                        let n = normal_transform.map_or(n, |(x, y, z, det)| {
                             // Cofactors are the inverse-transpose up to a common determinant;
                             // only the orientation sign is needed to align the exact face normal.
-                            let a = [m[0], m[1], m[2]];
-                            let b = [m[4], m[5], m[6]];
-                            let c = [m[8], m[9], m[10]];
-                            let det = dot(a, cross(b, c)).signum();
-                            let (x, y, z) = (cross(b, c), cross(c, a), cross(a, b));
                             std::array::from_fn(|i| (x[i] * n[0] + y[i] * n[1] + z[i] * n[2]) * det)
                         });
                         for i in 0..3 {
@@ -569,6 +594,35 @@ mod tests {
         assert!(world.overlay_index().is_some());
         assert_eq!(world.wet_contact([0.,0.2,0.],0.5),Some([0.,0.,0.]));
         assert!(World::default().finish_geometry_while(||false).is_none());
+    }
+    #[test]
+    fn transformed_receiver_keeps_winding_and_cover_with_mirrored_scale() {
+        let mut world = World::default();
+        let matrix = [-2.,0.,0.,0., 0.,3.,0.,0., 0.,0.,0.5,0., 12.,4.,-7.,1.];
+        world.add_receiver_mesh(&plane(0., 2.), Some(matrix), 7, true, true);
+        assert_eq!(world.triangles.len(), 2);
+        assert!(world.triangles.iter().all(|triangle| triangle.normal[1] > 0.99));
+        let world = world.finish_geometry_while(|| true).unwrap();
+        assert_eq!(world.wet_contact([12., 4.2, -7.], 1.), Some([12., 4., -7.]));
+        assert!(world.ray_distance([12., 3., -7.], [0., 1., 0.], 2.).is_some());
+    }
+    #[test]
+    fn streamed_receiver_cache_preserves_geometry_and_current_group() {
+        let geometry=plane(0.,2.);
+        let matrix=[-2.,0.,0.,0.,0.,3.,0.,0.,0.,0.,0.5,0.,12.,4.,-7.,1.];
+        let key=(Some("DLC_Test".to_owned()),1,2,3,4,Some(matrix.map(f32::to_bits)),true,true);
+        let mut cache=ReceiverCache::new();
+        let mut first=World::default();
+        add_cached_receiver(&mut first,&mut cache,key.clone(),&geometry,Some(matrix),7,true,true);
+        let mut reused=World::default();
+        add_cached_receiver(&mut reused,&mut cache,key,&geometry,Some(matrix),9,true,true);
+        assert_eq!(cache.len(),1);
+        assert_eq!(first.triangles.len(),reused.triangles.len());
+        for (a,b) in first.triangles.iter().zip(&reused.triangles) {
+            assert_eq!(a.points,b.points);assert_eq!(a.normal,b.normal);
+            assert_eq!(a.wettable,b.wettable);assert_eq!(a.blocks_rain,b.blocks_rain);
+            assert_eq!(a.group,7);assert_eq!(b.group,9);
+        }
     }
     #[test]
     fn area_rank_guarantees_coverage_cap_on_each_mesh() {

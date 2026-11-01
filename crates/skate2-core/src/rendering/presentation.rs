@@ -23,6 +23,9 @@ pub struct PresentationScene {
     /// The mission hulls' presentation collections the hull loaders registered
     /// ([`HullPresentation`]), outside stream focus.
     pub hulls: Vec<PresentationCollection>,
+    /// PC park editor: the placed mission props, each a copy of the part of its hull's fused
+    /// mesh it was cut from, moved to where it was put. Outside stream focus.
+    pub placed: Vec<PresentationCollection>,
     /// The registered PROXY collections (`proxy_world_manager`): the
     /// low-detail city wherever no high collection is registered. Loaded once
     /// and shared between generations, never edited.
@@ -213,13 +216,14 @@ pub struct PresentationSceneCounts {
 
 impl PresentationScene {
     /// Stable draw/texture handle order: spatial collections, then ancestors,
-    /// then loose arenas, then mission hulls, then registered proxies.
+    /// then loose arenas, then mission hulls, then placed mission props, then registered proxies.
     pub fn resident_collections(&self) -> impl Iterator<Item = &PresentationCollection> {
         self.collections
             .iter()
             .chain(&self.dependencies)
             .chain(&self.loose)
             .chain(&self.hulls)
+            .chain(&self.placed)
             .chain(self.proxies.iter().map(Arc::as_ref))
     }
 
@@ -232,6 +236,7 @@ impl PresentationScene {
             .chain(&mut self.dependencies)
             .chain(&mut self.loose)
             .chain(&mut self.hulls)
+            .chain(&mut self.placed)
     }
 
     pub fn resident_collection(&self, index: usize) -> Option<&PresentationCollection> {
@@ -250,7 +255,11 @@ impl PresentationScene {
         if index < self.hulls.len() {
             return self.hulls.get(index);
         }
-        self.proxies.get(index - self.hulls.len()).map(Arc::as_ref)
+        let index = index - self.hulls.len();
+        if index < self.placed.len() {
+            return self.placed.get(index);
+        }
+        self.proxies.get(index - self.placed.len()).map(Arc::as_ref)
     }
 
     #[must_use]
@@ -446,6 +455,7 @@ mod tests {
             dependencies: Vec::new(),
             loose: Vec::new(),
             hulls: Vec::new(),
+            placed: Vec::new(),
             proxies: Vec::new(),
             location_name: "test".to_owned(),
             focus: [0.0; 3],
@@ -527,6 +537,7 @@ mod tests {
             dependencies: Vec::new(),
             loose: Vec::new(),
             hulls: Vec::new(),
+            placed: Vec::new(),
             proxies: Vec::new(),
             location_name: "test".to_owned(),
             focus: [0.0; 3],

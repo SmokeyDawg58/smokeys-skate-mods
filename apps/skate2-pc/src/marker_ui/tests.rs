@@ -1618,3 +1618,43 @@ fn original_receipt_lists_the_cart_and_scrolls_its_window() {
     for _ in 0..20 {screen.tick(&assets).unwrap();}
     assert!(screen.root.is_none(),"the outro unloads the screen");
 }
+
+/// The LB quick menu's Object Dropper row (PC park editor): in free skate the third row below the
+/// divider is Object Dropper on D-pad Left; Contacts is a fourth row below it.
+#[test]
+#[ignore = "requires external SKATE2_GAME_ROOT"]
+fn original_quick_menu_has_the_object_dropper_row() {
+    let root = std::path::PathBuf::from(std::env::var_os("SKATE2_GAME_ROOT").unwrap());
+    let mut mounts = MountSet::new();
+    for spec in SKATE2_ARCHIVES.iter().take(4) {
+        mounts.push(MountedBig::open(spec.path_under(&root), spec.use_external_header).unwrap());
+    }
+    let assets = Assets::load(&mounts).unwrap();
+    for contacts in [false, true] {
+        let mut clip = Clip::new(&assets, 0, 0).unwrap();
+        clip.named(&["mcQuickMenu"]).unwrap().goto(&assets, "maximized").unwrap();
+        let open = clip.named(&["mcQuickMenu", "mQuickOpen"]).unwrap();
+        open.goto(&assets, "main").unwrap();
+        layout_object_dropper_row(open, contacts).unwrap();
+        label_quick_menu(open, &assets, MarkerPermissions { use_allowed: true, set_allowed: true }, false).unwrap();
+        for _ in 0..60 {
+            clip.tick(&assets).unwrap();
+        }
+        let text = |clip: &mut Clip, row: &str| clip.named(&["mcQuickMenu", "mQuickOpen", row, "mText", "labelText"]).ok()
+            .and_then(|label| label.text.as_ref().map(|t| String::from_utf16_lossy(t)));
+        assert_eq!(text(&mut clip, "mTextHelp2").as_deref(), Some("Object Dropper"));
+        assert_eq!(text(&mut clip, "mTextHelp3").is_some(), contacts);
+        let mut draws = Vec::new();
+        flatten(&assets, &clip, IDENTITY, Colour::default(), (1280, 720), &mut draws).unwrap();
+        // Each button's top on screen (clip y over w: up is larger).
+        let top = |suffix: &str| draws.iter()
+            .filter(|d| d.texture.as_ref().is_some_and(|t| t.to_ascii_lowercase().ends_with(suffix)))
+            .flat_map(|d| d.vertices.iter().map(|v| v[1] / v[3]))
+            .reduce(f32::max);
+        let image = clip.named(&["mcQuickMenu", "mQuickOpen"]).unwrap().children.get_mut(&28)
+            .unwrap().clip.named(&["mButtonRender"]).unwrap().properties.get("_test").cloned();
+        assert_eq!(image.as_deref(), Some("DPad_Left"));
+        let y = top("button_y.texture");
+        assert_eq!(y.is_some(), contacts);
+    }
+}

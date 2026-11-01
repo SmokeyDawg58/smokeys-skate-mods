@@ -136,6 +136,49 @@ impl Viewer {
         Ok(Some((character, models)))
     }
 
+    /// The viewer's own animation database.
+    pub(super) fn data(&self) -> &Arc<SceneAnimData> {
+        &self.data
+    }
+
+    /// PC park editor: every clip the viewer's database holds (the screen's own first), for a
+    /// placed character's animation setting.
+    pub(super) fn clip_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.data.database.clips.iter().map(|clip| clip.name.clone()).collect();
+        if let Some(own) = names.iter().position(|name| name.eq_ignore_ascii_case(&self.anim)) {
+            let own = names.remove(own);
+            names.insert(0, own);
+        }
+        names
+    }
+
+    /// PC park editor: the marquee `schema` standing at `position`, facing `rotation` (radians),
+    /// on the viewer's clip from its start; its model streams in through its own models.
+    pub(super) fn placed_character(
+        &self,
+        schema: &str,
+        position: [f32; 3],
+        rotation: f32,
+        animation: Option<(&Arc<SceneAnimData>, usize)>,
+    ) -> Result<(SceneCharacter, SceneCharacterModels), String> {
+        // Another database's clip (a gesture, a NIS scene) when it plays on this skeleton,
+        // else the viewer's own.
+        let other = animation.and_then(|(data, clip)| {
+            let name = &data.database.clips.get(clip)?.name;
+            SceneCharacterAnim::viewer(Arc::clone(data), name).ok()
+        });
+        let mut anim = match other {
+            Some(anim) => anim,
+            None => SceneCharacterAnim::viewer(Arc::clone(&self.data), &self.anim)?,
+        };
+        // A `z_` model has no face; it keeps the clip's.
+        let _ = anim.init_face(&self.face, schema, None);
+        let mut character = SceneCharacter::new(0, schema.to_owned(), "marquee".into(), false, position, [0.0; 3], anim);
+        character.set_viewer_transform(position, rotation);
+        character.set_time(0.0)?;
+        Ok((character, SceneCharacterModels::with_clone_type(NO_CLONE)))
+    }
+
     /// `Shutdown`: `MVManager::Shutdown` 0x8281ea20 unloads the character.
     pub(super) fn shutdown(&mut self) {
         self.shown = None;

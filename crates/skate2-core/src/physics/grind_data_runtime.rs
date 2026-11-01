@@ -215,6 +215,27 @@ impl GrindSplineSource {
             data: Arc::new(SplineData::parse(bytes).map_err(GrindDataSourceError::Parse)?),
         })
     }
+    /// PC park editor: splines built in code (a grind board's deck edges), owned by an empty
+    /// collision arena of their own.
+    pub(crate) fn from_built_spline_data(asset_id: u64, data: SplineData) -> Self {
+        let owner = crate::world::CollisionArena {
+            id: 0,
+            grind_assets: Vec::new(),
+            aggregate_roots: Vec::new(),
+            primitive_sets: Vec::new(),
+            simple_primitive_sets: Vec::new(),
+            meshes: Vec::new(),
+            collision_models: Vec::new(),
+            instances: Vec::new(),
+        };
+        Self {
+            owner: GrindSplineOwner::Character(Arc::new(owner)),
+            operation_index: None,
+            dictionary_index: 0,
+            asset_id,
+            data: Arc::new(data),
+        }
+    }
     pub(crate) fn data(&self) -> &SplineData {
         &self.data
     }

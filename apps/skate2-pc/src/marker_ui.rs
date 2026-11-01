@@ -2424,14 +2424,9 @@ impl MarkerUi {
             ScreenState::Minimized => update_minimized_menu(quick, &self.assets, minimized)?,
             ScreenState::MaximizedWithOptions | ScreenState::MaximizedMarkerOnly => {
                 quick.goto(&self.assets, "maximized")?;
-                quick.named(&["mQuickOpen"])?.goto(
-                    &self.assets,
-                    if state == ScreenState::MaximizedWithOptions {
-                        "main"
-                    } else {
-                        "main2"
-                    },
-                )?;
+                let open = quick.named(&["mQuickOpen"])?;
+                open.goto(&self.assets, "main")?;
+                layout_object_dropper_row(open, state == ScreenState::MaximizedWithOptions || spectate)?;
                 self.refresh(permissions, spectate)?;
             }
             ScreenState::RefreshMarkerPermissions => self.refresh(permissions, spectate)?,
@@ -2442,40 +2437,74 @@ impl MarkerUi {
         }
         Ok(())
     }
-    /// The quick menu's rows; with `spectate`, the options row is an online game's B Spectate
-    /// (PC port addition): its text, and its button (the unnamed one at depth 28 of `main`) B in
-    /// place of the placement's own.
     fn refresh(&mut self, p: MarkerPermissions, spectate: bool) -> RenderResult<()> {
-        /// `main`'s button beside the options row.
-        const OPTIONS_BUTTON_DEPTH: i32 = 28;
-        let menu = self.root.named(&["mcQuickMenu", "mQuickOpen"])?;
-        for (help, allowed, label) in [
-            ("mTextHelp0", p.use_allowed, "ID_PHONELIST_GOTO_MARKER"),
-            ("mTextHelp1", p.set_allowed, "ID_PHONELIST_PLACE_MARKER"),
-            ("mTextHelp2", true, "ID_PHONELIST_OPTIONS_TITLE"),
-        ] {
-            let text = menu.named(&[help, "mText"])?;
-            if help != "mTextHelp2" {
-                text.goto(&self.assets, if allowed { "enabled" } else { "disabled" })?;
-            }
-            text.named(&["labelText"])?.text = Some(if help == "mTextHelp2" && spectate {
-                "Spectate".encode_utf16().collect()
-            } else {
-                self.assets.strings[label].clone()
-            });
-        }
-        if let Some(button) = menu.children.get_mut(&OPTIONS_BUTTON_DEPTH) {
-            let image = if spectate { Some("B".to_owned()) } else { button.clip.properties.get("mButtonImage").cloned() };
-            if let Some(image) = image {
-                button.clip.named(&["mButtonRender"])?.properties.insert("_test".into(), image);
-            }
-        }
-        for name in ["labelText", "labelText_glow"] {
-            menu.named(&["mcTextHeader", name])?.text =
-                Some(self.assets.strings["ID_PHONELIST_TITLE"].clone());
-        }
-        Ok(())
+        label_quick_menu(self.root.named(&["mcQuickMenu", "mQuickOpen"])?, &self.assets, p, spectate)
     }
+}
+
+/// `hudphonelist`'s maximized labels: the marker rows enabled or not by their permissions, the
+/// Object Dropper row, Contacts when it is shown, and the title.
+fn label_quick_menu(menu: &mut Clip, assets: &Assets, p: MarkerPermissions, spectate: bool) -> RenderResult<()> {
+    for (help, allowed, label) in [
+        ("mTextHelp0", p.use_allowed, "ID_PHONELIST_GOTO_MARKER"),
+        ("mTextHelp1", p.set_allowed, "ID_PHONELIST_PLACE_MARKER"),
+    ] {
+        let text = menu.named(&[help, "mText"])?;
+        text.goto(assets, if allowed { "enabled" } else { "disabled" })?;
+        text.named(&["labelText"])?.text = Some(assets.strings[label].clone());
+    }
+    menu.named(&["mTextHelp2", "mText", "labelText"])?.text = Some("Object Dropper".encode_utf16().collect());
+    if menu.children.contains_key(&QUICK_CONTACTS_TEXT) {
+        menu.named(&["mTextHelp3", "mText", "labelText"])?.text = Some(if spectate {"Spectate".encode_utf16().collect()} else {assets.strings["ID_PHONELIST_OPTIONS_TITLE"].clone()});
+        menu.children.get_mut(&QUICK_CONTACTS_BUTTON).ok_or("quick menu options button absent")?
+            .clip.named(&["mButtonRender"])?.properties.insert("_test".into(), if spectate { "B" } else { "Y" }.into());
+    }
+    for name in ["labelText", "labelText_glow"] {
+        menu.named(&["mcTextHeader", name])?.text = Some(assets.strings["ID_PHONELIST_TITLE"].clone());
+    }
+    Ok(())
+}
+
+/// The quick menu's row pitch in `main` (`mTextHelp0` at 111, `mTextHelp1` at 146).
+const QUICK_ROW: f32 = 35.;
+/// Depths of the Contacts row's copy (text, button), just above the third row's (14, 28).
+const QUICK_CONTACTS_TEXT: i32 = 15;
+const QUICK_CONTACTS_BUTTON: i32 = 29;
+
+/// PC park editor: the quick menu's third row, below the divider (`mTextHelp2` at depth 14, its
+/// Button Item at 28), is Object Dropper on D-pad Left. With the phone options
+/// (`contacts`), the Contacts row (Y) goes below it as a copy one row down, and the lower panel
+/// (character 38, local y 90..154, at y 185..249 in `main`) and the Sidekick logo (depth 38, at
+/// y 241) are taken down a row with it.
+fn layout_object_dropper_row(open: &mut Clip, contacts: bool) -> RenderResult<()> {
+    open.children.remove(&QUICK_CONTACTS_TEXT);
+    open.children.remove(&QUICK_CONTACTS_BUTTON);
+    let extra = if contacts { QUICK_ROW } else { 0. };
+    if contacts {
+        for (from, to) in [(14, QUICK_CONTACTS_TEXT), (28, QUICK_CONTACTS_BUTTON)] {
+            let mut row = open.children.get(&from).ok_or("quick menu third row absent")?.clone();
+            row.entry.matrix.ty += QUICK_ROW;
+            if from == 14 {
+                row.entry.name = Some("mTextHelp3".into());
+            } else {
+                // Copy the authored Contacts icon, not an Object Dropper icon
+                // left over from a previous opening of this menu.
+                let icon = row.clip.properties.get("mButtonImage").cloned().unwrap_or_else(|| "DPad_Left".into());
+                row.clip.named(&["mButtonRender"])?.properties.insert("_test".into(), icon);
+            }
+            open.children.insert(to, row);
+        }
+    }
+    open.children.get_mut(&28).ok_or("quick menu third button absent")?
+        .clip.named(&["mButtonRender"])?.properties.insert("_test".into(), "DPad_Left".into());
+    let panel = open.children.get_mut(&4).ok_or("quick menu lower panel absent")?;
+    panel.clip.script_transform = true;
+    panel.entry.matrix.d = (64. + extra) / 64.;
+    panel.entry.matrix.ty = 185. - 90. * panel.entry.matrix.d;
+    let logo = open.children.get_mut(&38).ok_or("quick menu logo absent")?;
+    logo.clip.script_transform = true;
+    logo.entry.matrix.ty = 241. + extra;
+    Ok(())
 }
 
 /// `hudphonelist.UpdateMinimizedMenu`: the quick menu plays `minimized` under
@@ -3420,7 +3449,7 @@ fn dropper_panel(
 ) -> Vec<Batch> {
     let pixels = (size.0.max(1) as f32, size.1.max(1) as f32);
     // Three quarters of the 720-line stage's size.
-    let k = pixels.1 / 720. * 0.75;
+    let k = (pixels.1 / 960.).min(pixels.0 / 700.);
     let new = || PanelPainter { size: pixels, vertices: Vec::new() };
     let (mut shapes, mut text, mut hints) = (new(), new(), new());
     let (left, width) = (60. * k, 600. * k);
@@ -3450,11 +3479,46 @@ fn dropper_panel(
         button_icon(&mut shapes, &mut text, body, body_atlas, "RT", [right - 8. * k - icon / 2., y + 23. * k], icon / 2.);
         y += strip + 8. * k;
     }
-    // The list: the selected row white behind Skate 2's chevron.
+    // Measure the footer first so long lists leave room for its text and controls.
+    let mut info_lines = Vec::new();
+    for line in &menu.info {
+        let mut current = String::new();
+        for word in line.split_whitespace() {
+            let next = if current.is_empty() { word.to_owned() } else { format!("{current} {word}") };
+            if !current.is_empty() && panel_text_width(body, &next, 17. * k) > width - 52. * k {
+                info_lines.push(current);
+                current = word.to_owned();
+            } else {
+                current = next;
+            }
+        }
+        if !current.is_empty() { info_lines.push(current); }
+    }
+    let mut hint_lines = usize::from(!menu.hints.is_empty());
+    let mut hint_x = left + 26. * k;
+    let radius = 14. * k;
+    for (button, label) in &menu.hints {
+        let icon = if button.len() > 2 { (panel_text_width(body, button, radius * 0.75) + radius).max(2. * radius) } else { 2. * radius };
+        let label_width = panel_text_width(hand, label, 20. * k);
+        if hint_x > left + 26. * k && hint_x + icon + 8. * k + label_width > right - 20. * k {
+            hint_lines += 1;
+            hint_x = left + 26. * k;
+        }
+        hint_x += icon + 8. * k + label_width + 22. * k;
+    }
+    let footer = 18. * k
+        + if menu.info.is_empty() { 0. } else { (10. + if menu.rows.is_empty() { 0. } else { 10. } + 28. * info_lines.len() as f32) * k }
+        + if hint_lines == 0 { 0. } else { (10. + 28. + 38. * (hint_lines - 1) as f32) * k };
+
+    // Keep the selected item in a window that fits above the fixed footer.
     let row = 36. * k;
-    for (index, (label, count)) in menu.rows.iter().enumerate() {
+    let capacity = (((pixels.1 - 24. * k - y - footer - 20. * k) / row).floor() as usize).max(1);
+    let shown = menu.rows.len().min(capacity);
+    let selected = menu.selected.unwrap_or(0).min(menu.rows.len().saturating_sub(1));
+    let first = selected.saturating_sub(shown / 2).min(menu.rows.len().saturating_sub(shown));
+    for (index, (label, count)) in menu.rows.iter().enumerate().skip(first).take(shown) {
         let selected = menu.selected == Some(index);
-        let top = y + 12. * k + index as f32 * row;
+        let top = y + 12. * k + (index - first) as f32 * row;
         let x = left + 56. * k;
         if selected {
             let chevron = if body.metrics.mapped_glyph(0xbb).is_some() { "\u{bb}" } else { ">>" };
@@ -3465,8 +3529,14 @@ fn dropper_panel(
             panel_text(&mut text, body, body_atlas, &format!("({count})"), end + 10. * k, top, 22. * k, TEXT_GREEN);
         }
     }
+    if first > 0 {
+        panel_text(&mut text, body, body_atlas, "^", right - 35. * k, y + 12. * k, 18. * k, TEXT_DIM);
+    }
+    if first + shown < menu.rows.len() {
+        panel_text(&mut text, body, body_atlas, "v", right - 35. * k, y + 12. * k + (shown - 1) as f32 * row, 18. * k, TEXT_DIM);
+    }
     if !menu.rows.is_empty() {
-        y += 12. * k + menu.rows.len() as f32 * row + 8. * k;
+        y += 12. * k + shown as f32 * row + 8. * k;
     }
     // Information, under a thin rule when it follows a list.
     if !menu.info.is_empty() {
@@ -3474,10 +3544,11 @@ fn dropper_panel(
             shapes.rect(left + 24. * k, y, right - 24. * k, y + 2. * k, PANEL_HEADER_BOTTOM, PANEL_HEADER_BOTTOM);
             y += 10. * k;
         }
-        for (index, line) in menu.info.iter().enumerate() {
-            panel_text(&mut text, body, body_atlas, line, left + 26. * k, y + 10. * k + index as f32 * 28. * k, 17. * k, TEXT_CREAM);
+        y += 10. * k;
+        for line in &info_lines {
+            panel_text(&mut text, body, body_atlas, line, left + 26. * k, y, 17. * k, TEXT_CREAM);
+            y += 28. * k;
         }
-        y += 10. * k + menu.info.len() as f32 * 28. * k;
     }
     // Button hints along the bottom, in the marker hand, as Skate 2's "Select  Back".
     if !menu.hints.is_empty() {
@@ -3487,6 +3558,11 @@ fn dropper_panel(
         for (button, label) in &menu.hints {
             // A word button is drawn as a pill as wide as the word.
             let icon = if button.len() > 2 { (panel_text_width(body, button, radius * 0.75) + radius).max(2. * radius) } else { 2. * radius };
+            let label_width = panel_text_width(hand, label, 20. * k);
+            if x > left + 26. * k && x + icon + 8. * k + label_width > right - 20. * k {
+                x = left + 26. * k;
+                y += 2. * radius + 10. * k;
+            }
             button_icon(&mut shapes, &mut text, body, body_atlas, button, [x + icon / 2., y + radius], radius);
             x += icon + 8. * k;
             let end = panel_text(&mut hints, hand, hand_atlas, label, x, y + 4. * k, 20. * k, TEXT_WHITE);

@@ -935,6 +935,38 @@ fn build_supported_unit_gp_with_numeric<N: AssemblyGroundNumeric>(
     })
 }
 
+/// PC park editor: a placed mission prop's triangle, already in world space, with the native
+/// contact features its hull mesh gave it (`ResidentGroundFeatures`: edge cosines and packed
+/// flags, kept by a rigid move), as the identity-placed ground record a mesh unit would build.
+pub(super) fn build_host_ground_triangle(
+    points: [[f32; 3]; 3],
+    edge_data: [f32; 3],
+    flags: u32,
+    user_tag: u32,
+) -> AssemblyGroundTriangle {
+    let mut numeric = HostAssemblyGroundNumeric;
+    // The identity transform's W row: every point's W is 1.
+    let point_w = [1.0; 3];
+    let (raw, squared) = build_raw_face_normal(points, point_w, &mut numeric);
+    let seed = numeric.reciprocal_sqrt_seed(squared);
+    let normal = finish_face_normal(raw, squared, seed);
+    build_gp_record(
+        AssemblyGroundTriangleTopology {
+            points,
+            edge_data,
+            flags,
+            volume_tag: 0,
+            user_tag,
+            source: AssemblyGroundTriangleSource { cluster_index: usize::MAX, unit_stream_offset: 0, primitive_in_unit: 0 },
+        },
+        point_w,
+        normal,
+        [0, 1, 2],
+        [1, 0, 2],
+        &mut numeric,
+    )
+}
+
 fn unit_points_overlap_box(points: &[[f32; 3]], query: AssemblyGroundQueryBox) -> bool {
     let mut minimum = points[0];
     let mut maximum = points[0];

@@ -70,6 +70,7 @@ pub(super) struct ReplayFrame {
     pub(super) world: RecordedWorld,
     pub(super) local_skater:usize,
     pub(super) players_recipe:Vec<bool>,
+    pub(super) weather:Option<crate::ui::weather::ReplayWeather>,
 }
 
 pub(super) struct RecordedWorld {
@@ -302,7 +303,9 @@ impl<T, C> SelectedLiveSession<T, C> {
             (frame,self.freeroam_replay.store_frame(frame).0)
         };
         if stored {
-            self.replay_frames.insert(frame, Arc::new(ReplayFrame { visual: submission, audio, world,local_skater,players_recipe }));
+            let weather=crate::ui::weather::current().ok().map(|mode|crate::ui::weather::ReplayWeather {
+                mode,phase:crate::ui::weather::rendered_phase() });
+            self.replay_frames.insert(frame, Arc::new(ReplayFrame { visual: submission, audio, world,local_skater,players_recipe,weather }));
         }
         // Both the tracker and BTreeMap iterate in ascending frame order.
         // Merge them once instead of binary-searching the entire tracker for
@@ -325,6 +328,22 @@ impl<T, C> SelectedLiveSession<T, C> {
     #[must_use]
     pub fn replay_restorer(&self) -> Option<&PresentationRestorer> {
         self.replay_clock.is_some().then_some(&self.replay_restorer)
+    }
+
+    /// Weather belonging to the currently restored replay frame, including
+    /// saved footage. Old recordings have no weather data and fall back to the
+    /// active preference.
+    pub fn replay_weather(&self)->Option<crate::ui::weather::ReplayWeather> {
+        let clock=self.replay_clock?;
+        let frames=self.recorded_frames();
+        let mut current=frames.get(&clock.current)?.weather?;
+        if let Some(previous)=self.replay_index().previous_frame(clock.current)
+            .and_then(|frame|frames.get(&frame)).and_then(|frame|frame.weather)
+            && previous.mode==current.mode && current.phase>=previous.phase
+            && current.phase-previous.phase<0.25 {
+            current.phase=previous.phase+(current.phase-previous.phase)*clock.fraction.clamp(0.,1.);
+        }
+        Some(current)
     }
 }
 

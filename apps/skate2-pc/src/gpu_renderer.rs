@@ -837,12 +837,13 @@ impl GpuRenderer {
 
     /// One `dynamicobject` material: `i_diffuse`, `i_specular`, `i_normal`,
     /// `i_detail`, the `i_environment` cube, `m_params[0..2]` and
-    /// `i_detailNormalUVScale`.
+    /// `i_detailNormalUVScale`, and a park piece's decal.
     pub(crate) fn create_dynamic_object_material(
         &self,
         textures: [&GpuTexture; 5],
         m_params: [[f32; 4]; 2],
         detail_normal_uv_scale: [f32; 4],
+        decal: Option<&GpuTexture>,
     ) -> RenderResult<Arc<wgpu::BindGroup>> {
         Ok(Arc::new(self.dynamic_objects.material(
             &self.device,
@@ -858,6 +859,7 @@ impl GpuRenderer {
                 [0.; 4],
             ],
             detail_normal_uv_scale,
+            decal,
         )?))
     }
     pub(crate) fn create_vehicle_material(
@@ -871,6 +873,7 @@ impl GpuRenderer {
             textures,
             params,
             char_params,
+            None,
         )?))
     }
 

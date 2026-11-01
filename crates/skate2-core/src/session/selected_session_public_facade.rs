@@ -280,6 +280,8 @@ pub struct SelectedVisualSnapshot<'a> {
     /// Local physics skeleton's world-space feet, for optional visual water contact.
     pub local_skater_feet: Option<[[f32; 3]; 2]>,
     pub provisional_clip_from_world: [f32; 16],
+    /// PC debug fly camera must override the restored gameplay camera.
+    pub debug_camera_override: bool,
     /// Translation lanes of the same `CameraMan` matrix the clip was built
     /// from; `UpdateRenderParams` 0x82852780 publishes it as `g_vViewPos`.
     pub camera_world_position: [f32; 3],
@@ -312,6 +314,11 @@ pub struct SelectedVisualSnapshot<'a> {
     pub local_board_deck: Option<[f32; 16]>,
     /// PC Object Dropper: each dropped copy of the player's board, its deck (Part 6) in world.
     pub dropped_boards: Vec<[f32; 16]>,
+    /// PC park editor: each placed mission prop, its `MISSION_PROPS` index and transform (row
+    /// major, its origin the prop's footprint centre at its base).
+    pub mission_props: Vec<(usize, [f32; 16])>,
+    /// PC park editor: the mission prop in the editor's hands, drawn where it is.
+    pub held_mission_prop: Option<(usize, [f32; 16])>,
     pub vehicles: Vec<crate::SelectedVehicleVisual>,
     pub pedestrians: Vec<crate::SelectedPedestrianVisual>,
     /// `CrowdPresentation`'s imposter targets and imposters.
@@ -600,6 +607,7 @@ pub struct SelectedLiveSession<T, C> {
     /// The connection to the dedicated server and the online game.
     online: online_session::Online,
     object_dropper: object_dropper::ObjectDropper,
+    debug_camera: debug_camera::DebugCamera,
     /// The pads' rumble.
     vibration: vibration_session::VibrationSession,
 }
@@ -661,6 +669,10 @@ impl<T, C> SelectedLiveSession<T, C> {
 
     #[must_use]
     pub fn new(mounts: Arc<MountSet>, data_root: &Path) -> Self {
+        // PC park editor: a new session starts with no placed mission props, characters or
+        // grind boards in the physics' shared lists.
+        crate::ui::object_dropper::publish_mission_placements(Vec::new());
+        crate::ui::object_dropper::publish_grind_boards(Vec::new());
         Self {
             inner: SelectedSession::new(mounts, data_root),
             boot_attempted: false,
@@ -726,6 +738,7 @@ impl<T, C> SelectedLiveSession<T, C> {
             presentation_area: None,
             online: Default::default(),
             object_dropper: Default::default(),
+            debug_camera: Default::default(),
             vibration: Default::default(),
         }
     }
@@ -2004,12 +2017,22 @@ impl<T, C> SelectedLiveSession<T, C> {
             let result = self.try_tick_once(&mut idle, policy, clamp);
             let real = self.inner.bound_input.as_ref().and_then(|input| input.selected_sample(&idle.real));
             match result {
-                Ok(outcome) => self.update_object_dropper(real, policy.dt).map(|()| outcome),
+                Ok(outcome) if self.object_dropper_open() => self.update_object_dropper(real, policy.dt).map(|()| outcome),
+                Ok(outcome) => Ok(outcome),
                 Err(e) => Err(e),
             }
+        } else if self.debug_camera_holds_input() {
+            let mut idle = crate::selected_production_input_owner::IdlePad { platform: pad, real: [None; 4], brake: false };
+            let result = self.try_tick_once(&mut idle, policy, clamp);
+            let real = self.inner.bound_input.as_ref().and_then(|input| input.selected_sample(&idle.real));
+            match result { Ok(outcome) => self.update_debug_camera(real, policy.dt).map(|()| outcome), Err(e) => Err(e) }
         } else {
             self.try_tick_once(pad, policy, clamp)
         };
+        // PC park editor: placed characters play their clips and stream their models.
+        if result.is_ok() {
+            result = self.update_placed_characters(policy.dt).and(result);
+        }
         // GameModule::DoGameUpdate (0x82730418) runs PlayerUI::Update on paused frames too:
         // CheckForPauseState (0x826477b0) fails, so the focus is cleared without simulating, and
         // the first unpaused update regains it (PlayerInputGainFocusData).
@@ -2154,15 +2177,27 @@ impl<T, C> SelectedLiveSession<T, C> {
             self.update_replay_editor(&replay_input,policy.dt,policy.has_focus)?;
             return Ok(SelectedQueuedFrameOutcome::Frontend);
         }
-        // PC mod policy: LB + B opens the editor in every playable challenge type,
-        // including career, party play and active online rounds. The world keeps running
-        // while the editor reads the real pad and the skater reads idle. Props stay local.
+        // Only career free roam and free skate may use the editor. A challenge can
+        // start while it is open, particularly online, so close it on that transition.
+        let mode = self.inner.player.as_ref()
+            .and_then(|player| player.selected.owners.services.skaters.backend().try_game_mode().ok());
+        let career_challenge = self.career.as_ref().is_some_and(career::CareerSession::main_challenge_active);
+        let online_freeskate = self.online_lobby_skating() && !self.online_is_challenge_game();
+        let dropper_mode_allowed = mode.is_some_and(|mode|
+            object_dropper::object_dropper_mode_allowed(mode, career_challenge, online_freeskate));
+        if self.object_dropper_open() && !dropper_mode_allowed {
+            self.close_object_dropper()?;
+        }
         let dropper_pad = self.inner.bound_input.as_ref().expect("ready input").raw_controller();
         let dropper_allowed = has_sim_input && policy.has_focus && !self.pause_menu.snapshot().visible
-            && !self.options_menu.visible();
-        if !self.object_dropper_open() && self.try_open_object_dropper(dropper_pad, dropper_allowed) {
+            && !self.options_menu.visible() && dropper_mode_allowed;
+        if !self.object_dropper_open() && !self.debug_camera_holds_input() && self.try_open_debug_camera(dropper_pad, dropper_allowed) {
+            crate::diagnostics::test_log::event("debug_camera_open", format_args!("free_roam=true"));
+            return Ok(SelectedQueuedFrameOutcome::Frontend);
+        }
+        if !self.debug_camera_holds_input() && !self.object_dropper_open() && self.try_open_object_dropper(dropper_pad, dropper_allowed) {
             crate::diagnostics::test_log::event("park_editor_open",format_args!(
-                "online={} career_challenge={} all_challenge_types=true",
+                "online={} career_challenge={} freeskate_only=true",
                 self.online_hud_active(),self.career.as_ref().is_some_and(|career|career.main_challenge_active())));
             return Ok(SelectedQueuedFrameOutcome::Frontend);
         }
@@ -2171,6 +2206,8 @@ impl<T, C> SelectedLiveSession<T, C> {
         let frontend_input = if map_challenge_loading { Default::default() } else { frontend_input };
         let main_challenge = self.career.as_ref().is_some_and(|career| career.main_challenge_active());
         let party_play = self.options_menu.visible() && self.party_play_mode()?;
+        let capturing_keys = self.options_menu.capture_debug_camera_buttons(dropper_pad.map_or(0, |pad| pad.buttons));
+        let frontend_input = if capturing_keys { Default::default() } else { frontend_input };
         let options = self.audio.update_options(&mut self.options_menu, frontend_input, policy.has_focus,
             main_challenge, party_play)?;
         if options != music_player_session::OptionsOutcome::Hidden {
@@ -2801,14 +2838,18 @@ impl<T, C> SelectedLiveSession<T, C> {
             }
         }
         if was_paused && pause.visible && !pause.jacked && policy.has_focus && frontend_input.select
-            && self.pause_menu.selected_option() == crate::ui::pause_menu::PauseMenuOption::Settings {
+            && matches!(self.pause_menu.selected_option(), crate::ui::pause_menu::PauseMenuOption::Settings | crate::ui::pause_menu::PauseMenuOption::Mods) {
             // GameBackEnd::IsFreeSkateMode: a game without the career's challenge system.
             let video = if self.career.is_none() {
                 crate::ui::options::VideoScreen::FreeSkate
             } else {
                 crate::ui::options::VideoScreen::Game
             };
-            self.options_menu.open(true, video, &self.audio.settings);
+            if self.pause_menu.selected_option() == crate::ui::pause_menu::PauseMenuOption::Mods {
+                self.options_menu.open_mods(video, &self.audio.settings);
+            } else {
+                self.options_menu.open(true, video, &self.audio.settings);
+            }
         }
         if was_paused && pause.visible && !pause.jacked && policy.has_focus && frontend_input.select
             && self.pause_menu.selected_option() == crate::ui::pause_menu::PauseMenuOption::Blog
@@ -3258,6 +3299,8 @@ impl<T, C> SelectedLiveSession<T, C> {
             .map(|_| RefCell::new(Vec::<String>::new()));
         #[cfg(feature = "skate3-runtime")]
         let mod_camera_angle = self.audio.settings.camera_angle;
+        #[cfg(feature = "skate3-runtime")]
+        let mod_camera_invert = [self.audio.settings.invert_x, self.audio.settings.invert_y];
         let profile_queued = crate::diagnostics::frame_profile::span(
             crate::diagnostics::frame_profile::TICK_QUEUED_FRAME,
         );
@@ -3279,7 +3322,7 @@ impl<T, C> SelectedLiveSession<T, C> {
                 #[cfg(feature = "skate3-runtime")]
                 frame.tick.configure_skate3_focus(skate3_has_focus);
                 #[cfg(feature = "skate3-runtime")]
-                frame.tick.configure_skate3_camera(mod_camera_angle);
+                frame.tick.configure_skate3_camera(mod_camera_angle, mod_camera_invert[0], mod_camera_invert[1]);
                 let board = frame.board;
                 let skeleton = frame.skeleton;
                 let presentation = frame.presentation;
@@ -4251,6 +4294,12 @@ impl<T, C> SelectedLiveSession<T, C> {
         world.local_skater_identity.as_ref().is_some_and(|identity| identity.backend().try_is_network_game().unwrap_or(false))
     }
 
+    /// Whether this session has entered an online game, independent of the audio identity.
+    #[must_use]
+    pub fn weather_online_game(&self) -> bool {
+        self.online.game.as_ref().is_some_and(|game| game.entered)
+    }
+
     /// The SkaterManager's Actor whose player ID is `GetLocalSimIndex`.
     fn audio_local_actor(&self) -> Option<std::sync::Arc<crate::actor_construction::ActorConstruction>> {
         let local = self.inner.world.as_ref()?.world.lock().ok()?.local_skater_identity.clone()?;
@@ -4500,6 +4549,9 @@ impl<T, C> SelectedLiveSession<T, C> {
         if self.object_dropper_open() {
             return self.try_object_dropper_visual_snapshot();
         }
+        if self.debug_camera_active() {
+            return self.debug_camera_visual();
+        }
         // An online game's scene camera, or the camera of the player Online.SwitchCamera follows.
         self.visual_snapshot(self.online_view_camera(), None)
     }
@@ -4738,6 +4790,7 @@ impl<T, C> SelectedLiveSession<T, C> {
                     feet.iter().flatten().all(|v| v.is_finite()).then_some(feet)
                 }),
             provisional_clip_from_world: camera.clip_from_world,
+            debug_camera_override: false,
             camera_world_position: camera.camera_matrix.columns()[3].xyz,
             camera_planes: [camera.near_plane, camera.far_plane],
             camera_forward: camera.camera_matrix.columns()[2].xyz,
@@ -4751,14 +4804,24 @@ impl<T, C> SelectedLiveSession<T, C> {
             skater_opacity: if borrowed { 1.0 } else { render.opacity },
             skater_ghosted: render.ghosted && !borrowed,
             skater_entity_type: if borrowed { 0x822 } else { 0x122 },
-            dynamic_objects,
+            dynamic_objects: {
+                let mut objects = dynamic_objects;
+                objects.extend(self.park_piece_visuals());
+                objects
+            },
             local_board_deck,
             dropped_boards,
+            mission_props: self.mission_prop_poses(),
+            held_mission_prop: None,
             vehicles,
             pedestrians,
             crowd: self.crowd_visual()?,
             chase_arrows: self.try_chase_arrows().map_err(|e| SelectedLiveError::failed(Stage::Visual, e))?,
-            scene_characters: self.career.as_ref().map(career::CareerSession::scene_visuals).unwrap_or_default(),
+            scene_characters: {
+                let mut characters = self.career.as_ref().map(career::CareerSession::scene_visuals).unwrap_or_default();
+                characters.extend(self.placed_character_visuals());
+                characters
+            },
             party_skaters: {
                 let mut skaters = self.inner.party_skater_visuals().map_err(|e| SelectedLiveError::failed(Stage::Visual, e))?;
                 skaters.extend(self.inner.ai_skater_visuals().map_err(|e| SelectedLiveError::failed(Stage::Visual, e))?);
@@ -5032,6 +5095,12 @@ mod minimap;
 mod props;
 #[path = "selected_session_object_dropper.rs"]
 mod object_dropper;
+#[path = "selected_session_debug_camera.rs"]
+mod debug_camera;
+#[path = "selected_session_mission_props.rs"]
+mod mission_props;
+#[path = "selected_session_park_assets.rs"]
+mod park_assets;
 
 #[path = "selected_session_extras.rs"]
 mod extras_session;

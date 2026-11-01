@@ -160,12 +160,13 @@ impl EditSkaterMovie {
         );
         // mBack is the authored animated Finished chevrons, not a Back label.
         // createskater never hides it; retain its native timeline visibility.
-        buttons(
-            self.root.named(&["mDone", "mButtonhelp", "mButtonmenu"])?,
-            assets,
-            &[("B", &view.help_b), ("A", &view.help_a)],
-            "Marker_streak", 24., 0xffff_ffec,
-        )?;
+        let scroll_label = "Scroll".to_owned();
+        let mut help = vec![("B", &view.help_b), ("A", &view.help_a)];
+        if mode == "style" && view.rows.len() > 6 {
+            help.push((if view.selected>=6 {"DPad_Up"}else{"DPad_Down"}, &scroll_label));
+        }
+        buttons(self.root.named(&["mDone", "mButtonhelp", "mButtonmenu"])?,
+            assets, &help, "Marker_streak", 24., 0xffff_ffec)?;
         buttons(
             self.root.named(&["mDone", "mStartbutton"])?,
             assets,
@@ -391,25 +392,58 @@ impl EditSkaterMovie {
         Ok(())
     }
     fn style(&mut self, assets: &Assets, view: &EditSkaterView) -> RenderResult<()> {
+        let scrolled = view.rows.len() > 6 && view.selected >= 6;
         let menu = self.root.named(&["mSelection", "mStylemenu"])?;
+        menu.named(&["mGestureTitle"])?.visible = !scrolled;
         text(
             menu.named(&["mGestureTitle", "LABELTEXT"])?,
             &assets.localize("ID_CAC_GESTURES_TITLE")?,
         );
+        let top = child(menu, "mItem0")?.entry.matrix.ty;
         for i in 0..6 {
-            let item = menu.named(&[&format!("mItem{i}")])?;
-            item.visible = i < view.rows.len();
-            if let Some(row) = view.rows.get(i) {
-                highlight(item, assets, row, i == view.selected)?;
+            let item_child = child(menu, &format!("mItem{i}"))?;
+            let original = if let Some(y)=item_child.clip.properties.get("style_original_y") {y.parse::<f32>()?}
+                else {let y=item_child.entry.matrix.ty;item_child.clip.properties.insert("style_original_y".into(),y.to_string());y};
+            let index = if scrolled && i >= 4 { i + 2 } else { i };
+            item_child.entry.matrix.ty = if scrolled && i >= 4 { top + (i-4) as f32 * 64. } else { original };
+            let item = &mut item_child.clip;
+            item.visible = !(scrolled && i < 4) && index < view.rows.len();
+            if let Some(row) = view.rows.get(index) {
+                highlight(item, assets, row, index == view.selected)?;
             }
         }
         for i in 0..4 {
-            child(menu, &format!("mButton{i}"))?.entry.colour_scale = if i == view.selected {
+            let button=child(menu, &format!("mButton{i}"))?;
+            button.clip.visible=!scrolled;
+            button.entry.colour_scale = if i == view.selected {
                 u32::MAX
             } else {
                 0x7fffffff
             };
         }
+        // Reuse the game's glowing selector artwork for the scroll cue.
+        let mut indicator = child(menu, "mItem4")?.clone();
+        indicator.entry.name = Some("styleScrollIndicator".into());
+        indicator.entry.matrix.tx += 180.;
+        indicator.entry.matrix.ty = top + 190.;
+        indicator.entry.matrix.a *= 0.50;
+        indicator.entry.matrix.d *= 0.50;
+        indicator.entry.colour_scale = u32::MAX;
+        indicator.clip.visible = view.rows.len() > 6;
+        indicator.clip.script_transform = true;
+        highlight(&mut indicator.clip, assets, &EditSkaterRow {
+            kind: "selector".into(), title: if scrolled {"Scroll Up"} else {"Scroll Down"}.into(),
+            subtitle: "".into(), ..Default::default()
+        }, true)?;
+        let arrow=child(&mut indicator.clip,"mArrowright")?;
+        arrow.entry.matrix.tx += 150.;
+        arrow.entry.matrix.ty -= 20.;
+        let (a,b,c,d)=(arrow.entry.matrix.a,arrow.entry.matrix.b,arrow.entry.matrix.c,arrow.entry.matrix.d);
+        if scrolled {arrow.entry.matrix.a=b;arrow.entry.matrix.b=-a;arrow.entry.matrix.c=d;arrow.entry.matrix.d=-c;}
+        else {arrow.entry.matrix.a=-b;arrow.entry.matrix.b=a;arrow.entry.matrix.c=-d;arrow.entry.matrix.d=c;}
+        arrow.clip.script_transform=true;
+        indicator.clip.named(&["mArrowleft"])?.visible=false;
+        menu.children.insert(1000, indicator);
         Ok(())
     }
 }
@@ -603,6 +637,14 @@ mod tests {
             assert_eq!(String::from_utf16(selector.named(&["mTitle", "TEXTLABEL"]).unwrap().text.as_ref().unwrap()).unwrap(), "Gesture Set");
             assert_eq!(String::from_utf16(selector.named(&["mSubtitle", "TEXTLABEL"]).unwrap().text.as_ref().unwrap()).unwrap(), set);
             assert!(selector.named(&["mArrowright"]).unwrap().visible);
+        }
+        gesture_view.rows.push(EditSkaterRow {kind:"selector".into(),title:"Skate 3 Style".into(),subtitle:"Default".into(),..Default::default()});
+        gesture_view.rows.push(EditSkaterRow {kind:"selector".into(),title:"Skate 3 Posture".into(),subtitle:"Default".into(),..Default::default()});
+        for (selected,slot,title) in [(6,4,"Skate 3 Style"),(7,5,"Skate 3 Posture"),(5,5,"Gesture Set")] {
+            gesture_view.selected=selected;movie.update(&assets,&gesture_view).unwrap();
+            let selector=movie.root.named(&["mSelection","mStylemenu",&format!("mItem{slot}")]).unwrap();
+            assert!(selector.visible);
+            assert_eq!(String::from_utf16(selector.named(&["mTitle","TEXTLABEL"]).unwrap().text.as_ref().unwrap()).unwrap(),title);
         }
         for selection in [Some(0), Some(1), None] {
             view.gender_confirmation = selection;

@@ -198,10 +198,17 @@ impl SettingsMovie {
             .iter()
             .map(|&row| options_row(assets, &state, row))
             .collect::<RenderResult<Vec<_>>>()?;
-        let controller_page=matches!(state.page,Page::StickSettings|Page::LeftStick|Page::RightStick);
-        if controller_page && (previous.page!=state.page || previous.selected!=state.selected) {
+        let controller_page=matches!(state.page,Page::StickSettings|Page::LeftStick|Page::RightStick|Page::Keybinds);
+        if controller_page && (previous.page!=state.page || previous.selected!=state.selected || previous.debug_camera_keys!=state.debug_camera_keys || previous.debug_camera_listening!=state.debug_camera_listening) {
             // Original Xbox360 button atlas; every hint matches the active control.
-            let help:&[(&str,&str)]=if state.page==Page::StickSettings {
+            let icons=state.debug_camera_keys.icons();
+            let mut key_help=vec![("B","ID_COMMON_BACK"),("A","#Change")];
+            if state.debug_camera_listening { key_help=vec![("B","#Cancel")]; }
+            else if icons.len()==2 { key_help.push((icons[1],"#Debug Camera")); key_help.push((icons[0],"#+")); }
+            else if let Some(icon)=icons.first() { key_help.push((*icon,"#Debug Camera")); }
+            let help:&[(&str,&str)]=if state.page==Page::Keybinds {
+                &key_help
+            } else if state.page==Page::StickSettings {
                 &[("B","ID_COMMON_BACK"),("A","ID_COMMON_SELECT"),("DPad_UpDown","#Navigate")]
             } else {
                 &[("B","ID_COMMON_BACK"),("DPad_UpDown","#Navigate"),("DPad_Left","#Decrease"),("DPad_Right","#Increase")]
@@ -278,7 +285,7 @@ impl SettingsMovie {
         } else {
             for (index, row) in rows.iter().enumerate() {
                 let clip = self.root.named(&[&format!("mItem{index}")])?;
-                if previous.selected != state.selected {
+                if previous.selected != state.selected || (state.page == Page::Keybinds && (previous.debug_camera_listening != state.debug_camera_listening || previous.debug_camera_unavailable != state.debug_camera_unavailable)) {
                     edit_skater_movie::highlight(clip, assets, row, index == state.selected)?;
                 } else if row.kind == "selector" {
                     // SetState50 refreshes the value without replaying selection.
@@ -355,6 +362,12 @@ fn options_row(assets: &Assets, state: &Snapshot, row: Row) -> RenderResult<Edit
             _ => percent(&title, stick.anti_deadzone),
         };
         return Ok(EditSkaterRow { kind: row.kind().into(), title, subtitle, value, ..Default::default() });
+    }
+    if row == Row::DebugCameraBind {
+        let title = if state.debug_camera_listening {
+            if state.debug_camera_unavailable { "Unavailable - try another combo".into() } else { "Press buttons, then release".into() }
+        } else { title };
+        return Ok(EditSkaterRow { kind: "option".into(), title, ..Default::default() });
     }
     let volume = match row {
         Row::SfxVolume => Some(state.volumes[0]),
@@ -624,17 +637,18 @@ mod tests {
                 state.subtitles = false;
                 state.camera_high = false;
                 // The Mods categories use this same authored S2 movie and fonts.
-                state.page = Page::Mods;
+                state.page = Page::Skate3Physics;
                 for difficulty in skate2_core::ui::gameplay::Difficulty::ALL {
                     state.gameplay.difficulty = difficulty;
                     movie.update(&assets, state, main.as_mut()).unwrap();
                     let item = movie.root.named(&["mItem1"]).unwrap();
                     assert_eq!(text(item, &["mSubtitle", "TEXTLABEL"]), difficulty.label());
                 }
+                state.page = Page::Video;
                 for on in [false,true] {
                     state.gameplay.airtime_slow_motion=on;
                     movie.update(&assets,state,main.as_mut()).unwrap();
-                    let item=movie.root.named(&["mItem2"]).unwrap();
+                    let item=movie.root.named(&["mItem3"]).unwrap();
                     assert_eq!(text(item,&["mTitle","TEXTLABEL"]),"Airtime Slow Motion");
                     assert_eq!(text(item,&["mSubtitle","TEXTLABEL"]),assets.localize(
                         if on { "ID_COMMON_ON" } else { "ID_COMMON_OFF" }).unwrap());
@@ -644,12 +658,10 @@ mod tests {
                     state.gameplay.skate3 = if on { skate2_core::ui::gameplay::Skate3Features::ALL }
                         else { skate2_core::ui::gameplay::Skate3Features::default() };
                     movie.update(&assets, state, main.as_mut()).unwrap();
-                    for (index, row) in state.rows().iter().enumerate() {
-                        let item = movie.root.named(&[&format!("mItem{index}")]).unwrap();
-                        assert_eq!(text(item, &["mTitle", "TEXTLABEL"]), row.title());
-                        assert_eq!(text(item, &["mSubtitle", "TEXTLABEL"]),
-                            assets.localize(if on { "ID_COMMON_ON" } else { "ID_COMMON_OFF" }).unwrap());
-                    }
+                    let item = movie.root.named(&["mItem0"]).unwrap();
+                    assert_eq!(text(item, &["mTitle", "TEXTLABEL"]), Row::AllSkate3Physics.title());
+                    assert_eq!(text(item, &["mSubtitle", "TEXTLABEL"]),
+                        assets.localize(if on { "ID_COMMON_ON" } else { "ID_COMMON_OFF" }).unwrap());
                 }
                 state.page = Page::Display;
                 movie.update(&assets, state, main.as_mut()).unwrap();

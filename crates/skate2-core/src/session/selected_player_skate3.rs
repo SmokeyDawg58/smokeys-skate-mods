@@ -20,7 +20,10 @@ impl SelectedPlayerTick {
         if !focused { self.raw_controller = Some(crate::input_pad::XboxPadSample { buttons: 0, left_trigger: 0, right_trigger: 0, left_x: 0, left_y: 0, right_x: 0, right_y: 0 }); }
     }
     pub(crate) fn allow_skate3_start(&mut self, allowed: bool) { self.allow_skate3_start = allowed; }
-    pub(crate) fn configure_skate3_camera(&mut self, camera_type: i32) { self.camera_type = camera_type; }
+    pub(crate) fn configure_skate3_camera(&mut self, camera_type: i32, invert_x: bool, invert_y: bool) {
+        self.camera_type = camera_type;
+        self.camera_invert_look = [invert_x, invert_y];
+    }
     pub(crate) fn skate3_output(&self) -> Option<std::sync::Arc<crate::skate3_native::FrameOutput>> {
         let owner = self.mode_owner.as_ref()?;
         let mode = owner.skate3.lock().ok()?;
@@ -293,6 +296,7 @@ impl SelectedPlayerTick {
         let camera_type = match self.camera_type { 0 => 0, 1 => 1, other => return Err(format!("Invalid native camera angle {other}")) };
         mode.as_mut().expect("loaded").use_actor_gesture_channels();
         mode.as_mut().expect("loaded").set_camera_type(camera_type);
+        mode.as_mut().expect("loaded").set_camera_invert_look(self.camera_invert_look);
         mode.as_mut().expect("loaded").set_input_focus(self.skate3_has_focus);
         mode.as_mut().expect("loaded").set_airtime_slow_motion(self.mod_settings.airtime_slow_motion);
         // The entered online flow publishes this on the actual simulation owner.

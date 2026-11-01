@@ -301,10 +301,10 @@ fn character_at(pixel:vec2<i32>)->f32 {
 }
 // A resolved water surface has a measurable entry/exit thickness. The
 // bottom stays visible in the shallows and receives increasing absorption below it.
-fn standing_water(pixel:vec2<f32>,state:Pixel)->vec4<f32> {
+fn standing_water(pixel:vec2<f32>,state:Pixel,relative:vec3<f32>)->vec4<f32> {
     let neutral=vec4<f32>(0.,0.,0.,1.);
     if state.depth>=.9999999 || water_domain.state.x<.5 || state.character>.001 {return neutral;}
-    let relative=unproject(pixel,state.depth);let near=unproject(pixel,0.);
+    let near=unproject(pixel,0.);
     let origin=weather.camera.xyz+near;let ray=normalize(relative-near);
     let native_travel=length(relative-near);
     let native_point=weather.camera.xyz+relative;
@@ -406,9 +406,9 @@ fn standing_water(pixel:vec2<f32>,state:Pixel)->vec4<f32> {
 
 // Composite water in front of only the actually submerged part of a
 // character. Keep its own colour/depth in place: never refract its silhouette.
-fn submerged_character(pixel:vec2<f32>,state:Pixel,colour:vec3<f32>)->vec3<f32> {
+fn submerged_character(pixel:vec2<f32>,state:Pixel,colour:vec3<f32>,relative:vec3<f32>)->vec3<f32> {
     if state.character<.5 || water_domain.state.x<.5 {return colour;}
-    let relative=unproject(pixel,state.depth);let near=unproject(pixel,0.);
+    let near=unproject(pixel,0.);
     let origin=weather.camera.xyz+near;let native=weather.camera.xyz+relative;
     let ray=normalize(relative-near);let travel_native=length(relative-near);
     if ray.y>=-.004 || length(native.xz-weather.camera.xz)>52. {return colour;}
@@ -447,15 +447,20 @@ fn after_rain_sky(direction:vec3<f32>,clear:vec3<f32>)->vec3<f32> {
     let original=textureSampleLevel(scene_colour,reflection_sampler,uv,0.);
     let state=pixel_state(pixel);let mask=state.character;let z=state.depth;var colour=storm_tone(original.rgb);
     let sky=state.sky>.9999;
+    var sky_direction=vec3<f32>(0.);
     if sky {
-        colour=storm_sky(normalize(unproject(v.clip.xy,.99999)));
+        sky_direction=normalize(unproject(v.clip.xy,.99999));
+        if weather.colour.w>.5 {colour=after_rain_sky(sky_direction,original.rgb);}
+        else {colour=storm_sky(sky_direction);}
     } else if z<.9999999 {
-        let coat=standing_water(v.clip.xy,state);colour=colour*coat.a+coat.rgb;
-        if mask>.001 {colour=submerged_character(v.clip.xy,state,colour);}
-        let distance=length(unproject(v.clip.xy,z));
+        // The same depth reconstruction feeds water, submerged characters and
+        // fog. Reuse it instead of solving the projection three times per pixel.
+        let relative=unproject(v.clip.xy,z);
+        let coat=standing_water(v.clip.xy,state,relative);colour=colour*coat.a+coat.rgb;
+        if mask>.001 {colour=submerged_character(v.clip.xy,state,colour,relative);}
+        let distance=length(relative);
         colour=mix(colour,vec3<f32>(.14,.16,.18),smoothstep(28.,150.,distance)*weather.state.x*weather.state.x*.18);
     }
-    if sky && weather.colour.w>.5 {colour=after_rain_sky(normalize(unproject(v.clip.xy,.99999)),original.rgb);}
     if state.sky>0. && !sky {
         // A resolved MSAA edge contains geometry plus native clear sky. Replace
         // only the sky share, preserving the geometry's original coverage.
@@ -466,7 +471,7 @@ fn after_rain_sky(direction:vec3<f32>,clear:vec3<f32>)->vec3<f32> {
         colour=max(vec3<f32>(0.),colour-storm_tone(clear)*state.sky)+overcast*state.sky;
     }
     let flash=weather.lightning.x;colour*=1.+0.45*flash;
-    if sky && flash>0. {let direction=normalize(unproject(v.clip.xy,.99999));colour=colour/(1.+.45*flash)+lightning(direction,weather.lightning.y,weather.lightning.z,flash);}
+    if sky && flash>0. {colour=colour/(1.+.45*flash)+lightning(sky_direction,weather.lightning.y,weather.lightning.z,flash);}
     return vec4<f32>(colour,original.a);
 }
 // The supplied CPU ribbon builder owns motion, shelter and geometry clipping.

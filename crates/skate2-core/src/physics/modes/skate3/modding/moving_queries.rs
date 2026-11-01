@@ -14,7 +14,7 @@ use skate3_core::{math::Vector3, physics::{
     triangle_query::{TriangleLineHit, triangle_segment},
 }};
 use skate_dynamics::{SolidBody, solid::{collider_triangles, sweep_sphere}};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 
 fn xyz(v: Vector3) -> [f32;3] { [v.x,v.y,v.z] }
 fn native(v: [f32;3]) -> Vector3 { Vector3::new(v[0],v[1],v[2]) }
@@ -31,8 +31,67 @@ fn body_frame(body: &SolidBody) -> [[f32; 4]; 4] {
 }
 fn geometry_id(id: u64) -> u32 { 0x8000_0000 | (id as u32 & 0x7fff_ffff) }
 
+/// Triangles per run of a mesh's index.
+const RUN: usize = 32;
+
+/// A placed mesh's triangles in runs of `RUN` (native order), each run's bounds, and the mesh as
+/// a contact world whose query meshes are those runs: queries and contacts skip the runs away
+/// from them instead of testing every triangle of a big piece. Built once per placed triangle
+/// set (a placement's triangles stay the same `Arc` while it does not move).
+pub(crate) struct MeshIndex {
+    bounds: Bounds,
+    runs: Vec<(std::ops::Range<usize>, Bounds)>,
+    pub world: Mutex<skate3_core::physics::board_world::BoardWorld>,
+}
+
+/// The index of `triangles`, built the first time they are asked for; None when they are
+/// not all finite.
+fn mesh_index(triangles: &Arc<PreparedTriangles>) -> Option<Arc<MeshIndex>> {
+    use skate3_core::physics::{board_world::{BoardWorld, query_metadata::{QueryMesh, QueryMetadata, QueryPool}}, drive_frames::RetailAffineTransform};
+    static INDEXES: Mutex<Vec<(Weak<PreparedTriangles>, Arc<MeshIndex>)>> = Mutex::new(Vec::new());
+    let mut indexes = INDEXES.lock().ok()?;
+    if let Some((_, index)) = indexes.iter().find(|(weak, _)| weak.strong_count() > 0 && std::ptr::eq(weak.as_ptr(), Arc::as_ptr(triangles))) {
+        return Some(Arc::clone(index));
+    }
+    indexes.retain(|(weak, _)| weak.strong_count() > 0);
+    let bounds = Bounds::from_points(triangles.triangle_bounds().iter().flat_map(|bounds| [bounds.min, bounds.max]))?;
+    let runs: Vec<_> = (0..triangles.triangles().len())
+        .step_by(RUN)
+        .map(|start| {
+            let range = start..(start + RUN).min(triangles.triangles().len());
+            let run = Bounds::from_points(triangles.triangle_bounds()[range.clone()].iter().flat_map(|bounds| [bounds.min, bounds.max]));
+            run.map(|run| (range, run))
+        })
+        .collect::<Option<_>>()?;
+    let metadata = QueryMetadata {
+        packed_surfaces: vec![0; triangles.triangles().len()],
+        meshes: runs
+            .iter()
+            .map(|(range, bounds)| QueryMesh {
+                triangle_range: range.clone(),
+                local_to_world: RetailAffineTransform::IDENTITY,
+                world_to_local: RetailAffineTransform::IDENTITY,
+                local_bounds: *bounds,
+                matching_group: 0,
+                rejection_flags: 0,
+                geometry: 0,
+                pool: QueryPool::Ground,
+            })
+            .collect(),
+        static_edges: Vec::new(),
+        island_flags: 0,
+    };
+    // The runs only narrow which triangles are tried (a superset of every pair the
+    // per-triangle test keeps, in native order), so contacts are the same.
+    let world = BoardWorld::with_query_metadata(triangles.triangles().to_vec(), metadata)
+        .unwrap_or_else(|_| BoardWorld::new(triangles.triangles().to_vec()));
+    let index = Arc::new(MeshIndex { bounds, runs, world: Mutex::new(world) });
+    indexes.push((Arc::downgrade(triangles), Arc::clone(&index)));
+    Some(index)
+}
+
 /// One moving body's authored mesh: world-space native triangles at the
-/// body's current placement, with their union bounds.
+/// body's current placement, with their union bounds and index.
 #[derive(Clone)]
 pub(crate) struct MeshQuery {
     pub id: u64,
@@ -41,20 +100,25 @@ pub(crate) struct MeshQuery {
     pub velocity: Vector3,
     pub triangles: Arc<PreparedTriangles>,
     pub bounds: Bounds,
+    pub index: Arc<MeshIndex>,
 }
 impl MeshQuery {
     pub(crate) fn new(body: &SolidBody, triangles: Arc<PreparedTriangles>) -> Option<Self> {
-        let bounds = Bounds::from_points(
-            triangles.triangle_bounds().iter().flat_map(|bounds| [bounds.min, bounds.max]))?;
-        Some(Self { id: body.id, frame: body_frame(body), velocity: native(body.linvel.to_array()), triangles, bounds })
+        let index = mesh_index(&triangles)?;
+        Some(Self { id: body.id, frame: body_frame(body), velocity: native(body.linvel.to_array()), triangles, bounds: index.bounds, index })
     }
     /// Native triangles whose bounds overlap `bounds`, in native order.
     pub(crate) fn candidates(&self, bounds: Bounds)
         -> impl Iterator<Item = &skate3_core::physics::board_world::WorldTriangle> {
         let overlaps = self.bounds.overlaps(bounds);
-        self.triangles.triangles().iter().zip(self.triangles.triangle_bounds())
-            .filter(move |(_, triangle)| overlaps && triangle.overlaps(bounds))
-            .map(|(triangle, _)| triangle)
+        let (triangles, triangle_bounds) = (self.triangles.triangles(), self.triangles.triangle_bounds());
+        self.index
+            .runs
+            .iter()
+            .filter(move |(_, run)| overlaps && run.overlaps(bounds))
+            .flat_map(|(range, _)| range.clone())
+            .filter(move |&index| triangle_bounds[index].overlaps(bounds))
+            .map(move |index| &triangles[index])
     }
 }
 

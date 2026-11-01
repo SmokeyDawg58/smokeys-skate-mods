@@ -37,6 +37,8 @@ pub enum Page {
     RightStick,
     Mods,
     Skate3Physics,
+    WeatherSettings,
+    Keybinds,
 }
 
 /// The Video Settings screen `OnMenuSelect` (`0x826871a0`) opens: `VideoSettingsMainMenu` in
@@ -61,6 +63,7 @@ pub enum Row {
     DisplaySettings,
     Mods,
     Skate3Physics,
+    WeatherSettings,
     AllSkate3Physics,
     Darkcatch,
     Footplants,
@@ -69,6 +72,8 @@ pub enum Row {
     AirtimeSlowMotion,
     Weather,
     WaterPhysics,
+    Keybinds,
+    DebugCameraBind,
     RainVolume,
     /// PC port addition: the Online Settings page.
     OnlineSettings,
@@ -121,13 +126,13 @@ impl Row {
     pub const fn kind(self) -> &'static str {
         match self {
             Self::MusicPlayer | Self::AudioSettings | Self::VideoSettings | Self::ControlSettings | Self::DisplaySettings
-            | Self::OnlineSettings | Self::Mods | Self::Skate3Physics | Self::StickSettings | Self::LeftStick | Self::RightStick | Self::ResetSticks => "option",
+            | Self::OnlineSettings | Self::Mods | Self::Skate3Physics | Self::WeatherSettings | Self::Keybinds | Self::StickSettings | Self::LeftStick | Self::RightStick | Self::ResetSticks => "option",
             Self::SfxVolume | Self::DialogueVolume | Self::MusicVolume | Self::RainVolume => "slider",
             Self::StickDeadzone | Self::StickAntiDeadzone => "morph",
             Self::PostFx | Self::Fisheye | Self::FrameRateCap | Self::VSync | Self::ResolutionScale
             | Self::FpsCounter | Self::Fullscreen | Self::Subtitles | Self::CameraAngle | Self::GrindTransparency
             | Self::MiniMap | Self::Hud | Self::OffboardYAxis | Self::Vibration | Self::ShowLobbyChat
-            | Self::ShowGhostPlayers | Self::StickMultiplier | Self::AllSkate3Physics | Self::Darkcatch | Self::Footplants | Self::Offboard | Self::Difficulty | Self::AirtimeSlowMotion | Self::Weather | Self::WaterPhysics => "selector",
+            | Self::ShowGhostPlayers | Self::StickMultiplier | Self::AllSkate3Physics | Self::Darkcatch | Self::Footplants | Self::Offboard | Self::Difficulty | Self::AirtimeSlowMotion | Self::Weather | Self::WaterPhysics | Self::DebugCameraBind => "selector",
         }
     }
     /// `gGameOptionsItems`' title id; the PC rows carry literal text.
@@ -141,6 +146,9 @@ impl Row {
             Self::DisplaySettings => "Display Settings",
             Self::Mods => "Mods",
             Self::Skate3Physics => "Skate 3 Physics",
+            Self::WeatherSettings => "Weather",
+            Self::Keybinds => "Keybinds",
+            Self::DebugCameraBind => "Debug Camera",
             Self::AllSkate3Physics => "All Skate 3 Physics",
             Self::Darkcatch => "Darkcatch",
             Self::Footplants => "Footplants",
@@ -192,16 +200,17 @@ const IN_GAME: &[Row] = &[
     Row::ControlSettings,
     Row::DisplaySettings,
     Row::OnlineSettings,
-    Row::Mods,
 ];
 const AUDIO: &[Row] = &[Row::SfxVolume, Row::DialogueVolume, Row::MusicVolume, Row::RainVolume];
-const MODS: &[Row] = &[Row::Skate3Physics, Row::Difficulty, Row::AirtimeSlowMotion, Row::Weather, Row::WaterPhysics];
-const SKATE3_PHYSICS: &[Row] = &[Row::AllSkate3Physics];
+const MODS: &[Row] = &[Row::Skate3Physics, Row::WeatherSettings, Row::Keybinds];
+const KEYBINDS: &[Row] = &[Row::DebugCameraBind];
+const SKATE3_PHYSICS: &[Row] = &[Row::AllSkate3Physics, Row::Difficulty];
+const WEATHER_SETTINGS: &[Row] = &[Row::Weather, Row::WaterPhysics];
 /// `gGameOptionsScreens` rows 7, 3 and 5 without `eSk8FEGameOption_VideoCalibration`, whose
 /// FE state 0 calibration screen is not ported.
-const VIDEO_MAIN_MENU: &[Row] = &[Row::Subtitles];
-const VIDEO_GAME: &[Row] = &[Row::CameraAngle, Row::GrindTransparency, Row::Subtitles];
-const VIDEO_FREESKATE: &[Row] = &[Row::CameraAngle, Row::GrindTransparency, Row::Subtitles, Row::MiniMap, Row::Hud];
+const VIDEO_MAIN_MENU: &[Row] = &[Row::Subtitles, Row::AirtimeSlowMotion];
+const VIDEO_GAME: &[Row] = &[Row::CameraAngle, Row::GrindTransparency, Row::Subtitles, Row::AirtimeSlowMotion];
+const VIDEO_FREESKATE: &[Row] = &[Row::CameraAngle, Row::GrindTransparency, Row::Subtitles, Row::MiniMap, Row::Hud, Row::AirtimeSlowMotion];
 /// `gGameOptionsScreens` row 8, with the PC Stick Settings page last.
 const CONTROL: &[Row] = &[Row::OffboardYAxis, Row::Vibration, Row::StickSettings];
 const STICK_SETTINGS: &[Row] = &[Row::LeftStick, Row::RightStick, Row::ResetSticks];
@@ -230,6 +239,9 @@ pub struct Snapshot {
     pub weather: super::weather::Mode,
     pub rain_volume: i32,
     pub water_physics: bool,
+    pub debug_camera_keys: super::debug_camera_keybinds::Bindings,
+    pub debug_camera_listening: bool,
+    pub debug_camera_unavailable: bool,
     /// `GetIntegerValue` 0x82643b10 of SFX, dialogue and music volume.
     pub volumes: [i32; 3],
     /// `GetStringValue` 0x82643d48 of Subtitles: `ID_COMMON_ON` with `mSubtitles` set.
@@ -276,6 +288,8 @@ impl Snapshot {
             Page::Online => ONLINE,
             Page::Mods => MODS,
             Page::Skate3Physics => SKATE3_PHYSICS,
+            Page::WeatherSettings => WEATHER_SETTINGS,
+            Page::Keybinds => KEYBINDS,
             Page::StickSettings => STICK_SETTINGS,
             Page::LeftStick | Page::RightStick => STICK,
         }
@@ -305,6 +319,8 @@ impl Snapshot {
             Page::Online => "Online Settings",
             Page::Mods => "Mods",
             Page::Skate3Physics => "Skate 3 Physics",
+            Page::WeatherSettings => "Weather",
+            Page::Keybinds => "Keybinds",
             Page::StickSettings => "Stick Settings",
             Page::LeftStick => "Left Stick",
             Page::RightStick => "Right Stick",
@@ -326,6 +342,10 @@ pub enum Action {
 #[derive(Default)]
 pub struct Controller {
     state: Snapshot,
+    /// Mods opened directly from the pause hub return to the hub on Back.
+    direct_mods: bool,
+    debug_camera_armed: bool,
+    debug_camera_capture: u16,
     saved: PcDisplaySettings,
     saved_gameplay: GameplaySettings,
     /// Show Lobby Chat as `online-config.json` last held it.
@@ -385,6 +405,37 @@ fn step_resolution_scale(value: u8, forward: bool) -> u8 {
     next.clamp(*RESOLUTION_SCALES.start(), *RESOLUTION_SCALES.end())
 }
 impl Controller {
+    /// Capture real pad buttons only while the keybind page is listening.
+    /// Returns true for every consumed frame, including the frame that finishes capture.
+    pub fn capture_debug_camera_buttons(&mut self, buttons: u16) -> bool {
+        if self.state.page != Page::Keybinds {
+            self.state.debug_camera_listening = false;
+            self.state.debug_camera_unavailable = false;
+            self.debug_camera_armed = false;
+            self.debug_camera_capture = 0;
+            return false;
+        }
+        if !self.state.debug_camera_listening { return false; }
+        if !self.debug_camera_armed {
+            if buttons == 0 { self.debug_camera_armed = true; }
+            return true;
+        }
+        if buttons & super::debug_camera_keybinds::TELEPORT != 0 {
+            self.state.debug_camera_listening = false;
+            self.state.debug_camera_unavailable = false;
+            self.debug_camera_capture = 0;
+            return true;
+        }
+        self.debug_camera_capture |= buttons;
+        if buttons == 0 && self.debug_camera_capture != 0 {
+            let mask = std::mem::take(&mut self.debug_camera_capture);
+            if super::debug_camera_keybinds::valid(mask) && super::debug_camera_keybinds::save(mask).is_ok() {
+                self.state.debug_camera_listening = false;
+                self.state.debug_camera_unavailable = false;
+            } else { self.state.debug_camera_unavailable = true; }
+        }
+        true
+    }
     pub fn load_gameplay(&mut self, settings: GameplaySettings) {
         self.state.gameplay = settings;
         self.saved_gameplay = settings;
@@ -449,6 +500,7 @@ impl Controller {
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
         let mut state = self.state;
+        state.debug_camera_keys = super::debug_camera_keybinds::current();
         state.water_physics = super::water_physics::enabled();
         state.weather = super::weather::current().unwrap_or_default();
         state.rain_volume = i32::from(super::weather::rain_steps().unwrap_or(10));
@@ -492,8 +544,15 @@ impl Controller {
         self.state.video = video;
         self.state.page = Page::Options;
         self.state.selected = 0;
+        self.direct_mods = false;
         self.held = None;
         self.refresh(settings);
+    }
+    /// Pause hub shortcut: use the same settings controller and save path.
+    pub fn open_mods(&mut self, video: VideoScreen, settings: &ProfileSettings) {
+        self.open(true, video, settings);
+        self.state.page = Page::Mods;
+        self.direct_mods = true;
     }
     pub fn close_after_save(&mut self) {
         self.saved_gameplay = self.state.gameplay;
@@ -564,6 +623,11 @@ impl Controller {
                 Page::StickSettings => (Page::Control, CONTROL.iter().position(|&row| row == Row::StickSettings).unwrap_or(0)),
                 Page::LeftStick => (Page::StickSettings, 0),
                 Page::RightStick => (Page::StickSettings, 1),
+                Page::Skate3Physics => (Page::Mods, 0),
+                Page::WeatherSettings => (Page::Mods, 1),
+                Page::Keybinds => (Page::Mods, 2),
+                Page::Mods if self.direct_mods => return Action::Exit,
+                Page::Mods => (Page::Options, FRONT_END.len()-1),
                 _ => (Page::Options, 0),
             };
             self.state.page = page;
@@ -586,6 +650,14 @@ impl Controller {
             self.state.selected = (self.state.selected + 1) % count;
         }
         let Some(&row) = self.state.rows().get(self.state.selected) else { return Action::None };
+        if input.select && row == Row::DebugCameraBind {
+            self.state.debug_camera_listening = true;
+            self.state.debug_camera_unavailable = false;
+            self.debug_camera_armed = false;
+            self.debug_camera_capture = 0;
+            self.sounds.push("FE_SOUND_CORE_A_BUTTON");
+            return Action::None;
+        }
         if input.select && row.kind() == "option" {
             // OnMenuSelect: core_a_button, then the category's screen.
             self.sounds.push("FE_SOUND_CORE_A_BUTTON");
@@ -598,6 +670,8 @@ impl Controller {
                 Row::OnlineSettings => self.state.page = Page::Online,
                 Row::Mods => self.state.page = Page::Mods,
                 Row::Skate3Physics => self.state.page = Page::Skate3Physics,
+                Row::WeatherSettings => self.state.page = Page::WeatherSettings,
+                Row::Keybinds => self.state.page = Page::Keybinds,
                 _ => self.state.page = Page::Video,
             }
             self.state.selected = 0;
@@ -608,6 +682,7 @@ impl Controller {
         }
         let step = if input.right { 1.0 } else { -1.0 };
         let volume = match row {
+            Row::DebugCameraBind => return Action::None,
             Row::WaterPhysics => {
                 self.sounds.push(if input.right { "FE_SOUND_CORE_NAV_RIGHT" } else { "FE_SOUND_CORE_NAV_LEFT" });
                 if let Err(error)=super::water_physics::toggle() {
@@ -817,11 +892,24 @@ mod tests {
         input
     }
     #[test]
+    fn pause_shortcut_opens_mods_and_back_returns_to_pause() {
+        let mut settings = ProfileSettings::default();
+        let mut menu = Controller::default();
+        menu.open_mods(VideoScreen::FreeSkate, &settings);
+        assert_eq!(menu.snapshot().page, Page::Mods);
+        menu.acknowledge_intro();
+        menu.update(press(|input| input.select = true), &mut settings);
+        assert_eq!(menu.snapshot().page, Page::Skate3Physics);
+        menu.update(press(|input| input.cancel = true), &mut settings);
+        assert_eq!(menu.snapshot().page, Page::Mods);
+        assert_eq!(menu.update(press(|input| input.cancel = true), &mut settings), Action::Exit);
+    }
+    #[test]
     fn skate3_mods_navigation_keeps_independent_difficulty_and_profile() {
         let mut settings = ProfileSettings::default();
         let original_profile = settings;
         let mut menu = Controller::default();
-        menu.open(true, VideoScreen::FreeSkate, &settings);
+        menu.open(false, VideoScreen::MainMenu, &settings);
         menu.acknowledge_intro();
         while menu.snapshot().rows()[menu.snapshot().selected] != Row::Mods { menu.update(press(|input| input.down = true), &mut settings); }
         assert_eq!(menu.snapshot().rows()[menu.snapshot().selected], Row::Mods);
@@ -835,13 +923,16 @@ mod tests {
         menu.update(press(|input| input.down = true), &mut settings);
         menu.update(press(|input| input.left = true), &mut settings);
         let features = menu.snapshot().gameplay.skate3;
-        assert_eq!(features, super::super::gameplay::Skate3Features::default());
+        assert_eq!(features, super::super::gameplay::Skate3Features::ALL);
+        assert_eq!(menu.snapshot().gameplay.difficulty.label(), "Easy Motorized");
         menu.update(press(|input| input.cancel = true), &mut settings);
         assert_eq!(menu.snapshot().page, Page::Mods);
         menu.update(press(|input| input.down = true), &mut settings);
-        menu.update(press(|input| input.left = true), &mut settings);
-        assert_eq!(menu.snapshot().gameplay.difficulty.label(), "Easy Motorized");
-        assert_eq!(menu.snapshot().gameplay.skate3, features);
+        menu.update(press(|input| input.select = true), &mut settings);
+        assert_eq!(menu.snapshot().page, Page::WeatherSettings);
+        assert_eq!(menu.snapshot().rows(), &[Row::Weather, Row::WaterPhysics]);
+        menu.update(press(|input| input.cancel = true), &mut settings);
+        assert_eq!(menu.snapshot().page, Page::Mods);
         assert!(menu.gameplay_dirty() && !menu.dirty() && !menu.display_dirty());
         assert_eq!(settings, original_profile);
         menu.update(press(|input| input.cancel = true), &mut settings);
@@ -860,9 +951,9 @@ mod tests {
         menu.load_gameplay(gameplay);
         menu.open(true,VideoScreen::FreeSkate,&profile);
         menu.acknowledge_intro();
-        while menu.snapshot().rows()[menu.snapshot().selected] != Row::Mods { menu.update(press(|i|i.down=true),&mut profile); }
+        while menu.snapshot().rows()[menu.snapshot().selected] != Row::VideoSettings { menu.update(press(|i|i.down=true),&mut profile); }
         menu.update(press(|i|i.select=true),&mut profile);
-        for _ in 0..2 { menu.update(press(|i|i.down=true),&mut profile); }
+        while menu.snapshot().rows()[menu.snapshot().selected] != Row::AirtimeSlowMotion { menu.update(press(|i|i.down=true),&mut profile); }
         assert_eq!(menu.snapshot().rows()[menu.snapshot().selected],Row::AirtimeSlowMotion);
         menu.update(press(|i|i.right=true),&mut profile);
         assert_eq!(menu.snapshot().gameplay,GameplaySettings{airtime_slow_motion:true,..gameplay});

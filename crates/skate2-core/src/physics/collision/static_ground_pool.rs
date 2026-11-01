@@ -343,6 +343,139 @@ impl fmt::Debug for StaticGroundPool {
     }
 }
 
+/// PC park editor: one placed mission prop triangle as Skate 2 ground.
+#[derive(Clone, Copy)]
+pub(crate) struct MissionGroundTriangle {
+    pub(crate) gp: crate::simulation_assembly_ground_triangle_topology::AssemblyGroundTriangle,
+    pub(crate) vertices: [[f32; 3]; 3],
+    pub(crate) surface_id: u16,
+}
+
+/// One placed prop's ground triangles and their world bounds (queries skip a prop whose bounds
+/// they miss). The triangles are in space-filling-curve order, in runs of `MISSION_CHUNK` with
+/// their own bounds, so a query near a big mesh (a placed character's is ~17,000 triangles)
+/// only visits the runs it overlaps.
+pub(crate) struct MissionGroundProp {
+    pub(crate) minimum: [f32; 3],
+    pub(crate) maximum: [f32; 3],
+    triangles: Vec<MissionGroundTriangle>,
+    chunks: Vec<([f32; 3], [f32; 3], std::ops::Range<usize>)>,
+}
+
+/// Triangles per run of a placed prop's ground.
+const MISSION_CHUNK: usize = 16;
+
+fn boxes_overlap(a: ([f32; 3], [f32; 3]), b: ([f32; 3], [f32; 3])) -> bool {
+    (0..3).all(|axis| a.0[axis] <= b.1[axis] && b.0[axis] <= a.1[axis])
+}
+
+fn triangle_bounds(vertices: &[[f32; 3]; 3]) -> ([f32; 3], [f32; 3]) {
+    let minimum = std::array::from_fn(|axis| vertices[0][axis].min(vertices[1][axis]).min(vertices[2][axis]));
+    let maximum = std::array::from_fn(|axis| vertices[0][axis].max(vertices[1][axis]).max(vertices[2][axis]));
+    (minimum, maximum)
+}
+
+/// 10 bits of each axis interleaved (Morton order).
+fn morton(cell: [u32; 3]) -> u32 {
+    let spread = |mut v: u32| {
+        v &= 0x3ff;
+        v = (v | (v << 16)) & 0x0300_00ff;
+        v = (v | (v << 8)) & 0x0300_f00f;
+        v = (v | (v << 4)) & 0x030c_30c3;
+        (v | (v << 2)) & 0x0924_9249
+    };
+    spread(cell[0]) | (spread(cell[1]) << 1) | (spread(cell[2]) << 2)
+}
+
+impl MissionGroundProp {
+    fn new(mut triangles: Vec<MissionGroundTriangle>) -> Self {
+        let mut minimum = [f32::MAX; 3];
+        let mut maximum = [f32::MIN; 3];
+        for vertex in triangles.iter().flat_map(|triangle| triangle.vertices) {
+            for axis in 0..3 {
+                minimum[axis] = minimum[axis].min(vertex[axis]);
+                maximum[axis] = maximum[axis].max(vertex[axis]);
+            }
+        }
+        let size: [f32; 3] = std::array::from_fn(|axis| (maximum[axis] - minimum[axis]).max(1e-3));
+        triangles.sort_by_cached_key(|triangle| {
+            morton(std::array::from_fn(|axis| {
+                let centre = (triangle.vertices[0][axis] + triangle.vertices[1][axis] + triangle.vertices[2][axis]) / 3.0;
+                (((centre - minimum[axis]) / size[axis]).clamp(0.0, 1.0) * 1023.0) as u32
+            }))
+        });
+        let chunks = (0..triangles.len())
+            .step_by(MISSION_CHUNK)
+            .map(|start| {
+                let range = start..(start + MISSION_CHUNK).min(triangles.len());
+                let mut low = [f32::MAX; 3];
+                let mut high = [f32::MIN; 3];
+                for triangle in &triangles[range.clone()] {
+                    let (a, b) = triangle_bounds(&triangle.vertices);
+                    for axis in 0..3 {
+                        low[axis] = low[axis].min(a[axis]);
+                        high[axis] = high[axis].max(b[axis]);
+                    }
+                }
+                (low, high, range)
+            })
+            .collect();
+        Self { minimum, maximum, triangles, chunks }
+    }
+
+    pub(crate) fn overlaps(&self, minimum: [f32; 3], maximum: [f32; 3]) -> bool {
+        boxes_overlap((self.minimum, self.maximum), (minimum, maximum))
+    }
+
+    /// The triangles whose bounds overlap a box, visiting only the runs it touches.
+    pub(crate) fn triangles_near(&self, minimum: [f32; 3], maximum: [f32; 3]) -> impl Iterator<Item = &MissionGroundTriangle> {
+        let query = (minimum, maximum);
+        let chunks: &[_] = if self.overlaps(minimum, maximum) { &self.chunks } else { &[] };
+        chunks
+            .iter()
+            .filter(move |(low, high, _)| boxes_overlap((*low, *high), query))
+            .flat_map(move |(_, _, range)| &self.triangles[range.clone()])
+            .filter(move |triangle| boxes_overlap(triangle_bounds(&triangle.vertices), query))
+    }
+}
+
+static MISSION_GROUND: std::sync::Mutex<Option<(u64, Arc<[MissionGroundProp]>)>> = std::sync::Mutex::new(None);
+
+/// PC park editor: the placed mission props as Skate 2 ground, world triangles that every ground
+/// query takes after the streamed slots (static ground carries identity placement, so the props
+/// are placed once here). Rebuilt only when the placements are published again.
+pub(crate) fn mission_prop_ground() -> Arc<[MissionGroundProp]> {
+    let generation = crate::ui::object_dropper::mission_generation();
+    let Ok(mut cache) = MISSION_GROUND.lock() else { return Arc::from([]) };
+    if let Some((cached, triangles)) = cache.as_ref()
+        && *cached == generation
+    {
+        return Arc::clone(triangles);
+    }
+    let placements = crate::ui::object_dropper::mission_placements();
+    let mut props = Vec::new();
+    for placement in placements.iter() {
+        let mut triangles = Vec::new();
+        let t = &placement.transform;
+        for (triangle, feature) in placement.shape.triangles.iter().zip(&placement.shape.features) {
+            let vertices = triangle
+                .vertices
+                .map(|[x, y, z]| std::array::from_fn(|row| t[row] * x + t[4 + row] * y + t[8 + row] * z + t[12 + row]));
+            let surface_id = triangle.surface_id.unwrap_or(0);
+            let user_tag = (u32::from(surface_id) << 16) | u32::from(triangle.group_id.unwrap_or(0));
+            triangles.push(MissionGroundTriangle {
+                gp: crate::simulation_assembly_ground_triangle_topology::build_host_ground_triangle(vertices, feature.edge_cosines, feature.flags, user_tag),
+                vertices,
+                surface_id,
+            });
+        }
+        props.push(MissionGroundProp::new(triangles));
+    }
+    let props: Arc<[MissionGroundProp]> = props.into();
+    *cache = Some((generation, Arc::clone(&props)));
+    props
+}
+
 impl StaticGroundPool {
     /// Runs the original no-spatial-index line job on these published slots.
     /// This is the ground child only; World default queries also require the
@@ -378,12 +511,47 @@ impl StaticGroundPool {
             }
         });
         let mut result = crate::collision_mesh_line::CollisionMeshLineNearest::new();
+        let (start, end, fatness) = (input.start, input.end, input.fatness);
         crate::collision_line_collection::try_publish_collection_line(
             meshes,
             input,
             &mut result,
             numeric,
         )?;
+        // PC park editor: placed mission props after the slots, nearest hit kept as the
+        // mesh line keeps it.
+        use crate::collision_triangle_line::{CollisionTriangleLineInput, CollisionTriangleLineOutput, try_triangle_line};
+        use crate::skeleton_root_transforms::SkeletonRootVector;
+        let delta = SkeletonRootVector {
+            xyz: std::array::from_fn(|axis| end.xyz[axis] - start.xyz[axis]),
+            w: end.w.zip(start.w).map(|(end, start)| end - start),
+        };
+        let mut output = CollisionTriangleLineOutput::default();
+        let line_minimum: [f32; 3] = std::array::from_fn(|axis| start.xyz[axis].min(end.xyz[axis]) - fatness);
+        let line_maximum: [f32; 3] = std::array::from_fn(|axis| start.xyz[axis].max(end.xyz[axis]) + fatness);
+        let ground = mission_prop_ground();
+        for triangle in ground.iter().flat_map(|prop| prop.triangles_near(line_minimum, line_maximum)) {
+            let triangle_input = CollisionTriangleLineInput {
+                start,
+                delta,
+                vertices: triangle.gp.points_full4().map(SkeletonRootVector::known),
+            };
+            if !matches!(try_triangle_line(&triangle_input, fatness, 0.0, &mut output, numeric), Ok(true)) {
+                continue;
+            }
+            let (Some(parameter), Some(position)) = (output.line_parameter, output.position) else { continue };
+            let lower = if -parameter >= 0.0 { 0.0 } else { parameter };
+            let clamped = if 1.0 - lower >= 0.0 { lower } else { 1.0 };
+            if clamped < result.line_parameter {
+                result.position = position;
+                result.normal = SkeletonRootVector::known(triangle.gp.normal_full4());
+                result.surface_id = triangle.surface_id;
+                result.line_parameter = clamped;
+                result.owner = None;
+                result.provenance = None;
+            }
+            result.hit_count = result.hit_count.wrapping_add(1);
+        }
         Ok(result)
     }
 
@@ -692,6 +860,17 @@ impl StaticGroundPool {
                 });
             }
         }
+        // PC park editor: placed mission props after the slots.
+        let ground = mission_prop_ground();
+        for triangle in ground.iter().flat_map(|prop| prop.triangles_near(minimum, maximum)) {
+            if !triangle_aabb_overlap(minimum, maximum, triangle.vertices) {
+                continue;
+            }
+            if result.len() >= TRAJECTORY_GROUND_TRIANGLE_CACHE_CAPACITY {
+                return Ok(result);
+            }
+            result.push(TrajectoryGroundTriangle { vertices: triangle.vertices, surface_id: u32::from(triangle.surface_id) });
+        }
         Ok(result)
     }
 
@@ -739,6 +918,20 @@ impl StaticGroundPool {
                         surface_id: hit.triangle.surface_id.map_or(0, u32::from),
                     });
                 }
+            }
+        }
+        // PC park editor: placed mission props after the slots.
+        let ground = mission_prop_ground();
+        for triangle in ground.iter().flat_map(|prop| prop.triangles_near(line_minimum, line_maximum)) {
+            let Some(hit) = skate2_formats::collision::sphere_segment_triangle_intersection(start, delta, radius, triangle.vertices) else { continue };
+            let parameter = native_clamp_line_parameter(hit.line_parameter);
+            if parameter < nearest_parameter {
+                nearest_parameter = parameter;
+                nearest = Some(TrajectorySweepHit {
+                    position: hit.position,
+                    normal: triangle_normal(triangle.vertices),
+                    surface_id: u32::from(triangle.surface_id),
+                });
             }
         }
         Ok(nearest)
@@ -2376,5 +2569,41 @@ pub(crate) mod tests {
             );
         }
         assert!(pool.slots[0].triangle_decode.get().unwrap().is_err());
+    }
+
+    /// A placed prop's runs give a query exactly the triangles a scan of all of them would,
+    /// visiting only a few: a character-sized mesh (17,280 triangles over a 0.6 x 1.8 x 0.4 m
+    /// box) and a board-sized query box at its hip.
+    #[test]
+    fn mission_ground_runs_match_a_full_scan() {
+        let mut triangles = Vec::new();
+        let (nx, ny, nz) = (24usize, 60usize, 12usize);
+        for i in 0..nx {
+            for j in 0..ny {
+                for k in 0..nz {
+                    let at = [i as f32 * 0.6 / nx as f32, j as f32 * 1.8 / ny as f32, k as f32 * 0.4 / nz as f32];
+                    let vertices = [at, [at[0] + 0.02, at[1], at[2]], [at[0], at[1] + 0.03, at[2] + 0.01]];
+                    triangles.push(super::MissionGroundTriangle {
+                        gp: crate::simulation_assembly_ground_triangle_topology::build_host_ground_triangle(vertices, [0.0; 3], 0x01e0, 0),
+                        vertices,
+                        surface_id: 0,
+                    });
+                }
+            }
+        }
+        let scan: Vec<[[f32; 3]; 3]> = triangles.iter().map(|triangle| triangle.vertices).collect();
+        let prop = super::MissionGroundProp::new(triangles);
+        assert_eq!(prop.triangles.len(), 17_280);
+        let query = ([0.2, 0.9, 0.1], [0.45, 1.05, 0.3]);
+        let mut near: Vec<[[f32; 3]; 3]> = prop.triangles_near(query.0, query.1).map(|triangle| triangle.vertices).collect();
+        let mut want: Vec<[[f32; 3]; 3]> = scan.into_iter().filter(|vertices| super::boxes_overlap(super::triangle_bounds(vertices), query)).collect();
+        let key = |v: &[[f32; 3]; 3]| v.map(|p| p.map(f32::to_bits));
+        near.sort_by_key(key);
+        want.sort_by_key(key);
+        let visited: usize = prop.chunks.iter().filter(|(low, high, _)| super::boxes_overlap((*low, *high), query)).map(|(_, _, range)| range.len()).sum();
+        eprintln!("mission ground RESULT {} of {} triangles in the box; runs visited {visited} triangles", near.len(), prop.triangles.len());
+        assert_eq!(near, want);
+        assert!(visited < prop.triangles.len() / 10, "the runs visited {visited} triangles");
+        assert_eq!(prop.triangles_near([5.0; 3], [6.0; 3]).count(), 0);
     }
 }

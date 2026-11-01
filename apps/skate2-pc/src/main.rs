@@ -208,6 +208,7 @@ const LIVING_WORLD_DMO_PRIORITY_REFERENCE_KEY: u64 = 0x1A3F_B63D_FDAE_0C4F;
 
 mod city_streaming;
 mod hull_presentation;
+mod mission_prop_render;
 mod dmo_render;
 mod gpu_renderer;
 mod career_photos;
@@ -12787,6 +12788,7 @@ fn load_runtime_presentation_scene_at(mounts:&MountSet,location_name:&str,focus:
         loose: load_loose_presentation_assets(mounts)?,
         // The hull loaders' collections, which the city streamer registers.
         hulls: Vec::new(),
+        placed: Vec::new(),
         // Registered by the city streamer once the PROXY world activates.
         proxies: Vec::new(),
         location_name: location_name.into(),

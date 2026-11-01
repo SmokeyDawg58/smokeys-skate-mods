@@ -763,7 +763,7 @@ impl<T, C> SelectedLiveSession<T, C> {
             ranked: false,
             challenge_type,
             challenge_key: create.then_some(key),
-            private: false,
+            private: std::env::var_os("SKATE2_DIAGNOSTIC_PRIVATE").is_some(),
             create,
             fallback_key: key,
         });

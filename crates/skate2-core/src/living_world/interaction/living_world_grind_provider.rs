@@ -155,7 +155,7 @@ fn query_dmo_grind_splines(
 /// Shared segment kernel. Vehicle82d237a0 raw VMX matches DMO82d30fb0:
 /// target pose, ordered radius>= rejection, inclusive AABB boundary, head..tail
 /// stride0x90 and endpoint FMA chains. false means native result capacity40 hit.
-fn query_entity_grind_splines<'a>(
+pub(crate) fn query_entity_grind_splines<'a>(
     kind: EntityKind,
     id: u32,
     transform: &[f32; 16],

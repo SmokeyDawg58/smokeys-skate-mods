@@ -118,8 +118,10 @@ impl Rain {
     }
     pub fn record(&self,device:&wgpu::Device,queue:&wgpu::Queue,encoder:&mut wgpu::CommandEncoder,map:&GpuMap,frame:Frame,output:&wgpu::TextureView)->RenderResult<()> {
         let mut frame=frame;
-        let(clock,rain_delta)=self.presentation.lock().map_err(|_|"rain presentation clock lock")?.sample(frame.clock);
+        let playback=crate::weather::playback();
+        let(clock,rain_delta)=self.presentation.lock().map_err(|_|"rain presentation clock lock")?.sample(frame.clock,playback);
         frame.clock=clock;crate::weather::set_rain_clock(clock);
+        if !playback.replay {skate2_core::ui::weather::set_rendered_phase(clock);}
         self.sky.upload(queue);
         let ready=map.rain_surface.get().and_then(|value|value.as_ref()).cloned();
         let retained={let mut previous=self.last_surface.lock().map_err(|_|"rain surface retention lock")?;

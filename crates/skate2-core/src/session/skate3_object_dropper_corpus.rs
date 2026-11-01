@@ -9,7 +9,7 @@
     let mut failed = Vec::new();
     for (index, &(_, name, guid)) in props.iter().enumerate() {
         // A copy of the player's board is a riderless board, not a bank prop (its own test).
-        if guid == crate::ui::object_dropper::YOUR_BOARD { continue; }
+        if crate::ui::object_dropper::is_board(guid) { continue; }
         let mut at = test_spawn;
         at[12] += 40.0 + 4.0 * index as f32;
         // As the game drops one: on a locator of its own, object spawned on it, then removed.

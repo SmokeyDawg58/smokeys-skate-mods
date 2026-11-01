@@ -3,7 +3,7 @@
 use super::{SelectedLiveError, SelectedLiveSession, SelectedLiveStage, SelectedSceneCharacterVisual, freeskate_viewer::Viewer};
 use crate::{
     challenge::{
-        attrib_db::AttribDb,
+        attrib_db::{AttribDb, CAREER_VAULTS},
         unlockables::{self, Unlockables},
     },
     edit_skater_profile::EditSkaterProfileStore,
@@ -81,6 +81,18 @@ impl<T, C> SelectedLiveSession<T, C> {
         let menu = self.main_menu.as_mut().ok_or_else(|| error("main menu absent"))?;
         menu.freeskate = Some(freeskate_option::Controller::new(characters, locations, self.freeskate.settings));
         Ok(())
+    }
+
+    /// The free skate data the FreeSkate screen loads (the career vaults and locations), loaded
+    /// for the park editor's characters too.
+    pub(super) fn freeskate_attrib_db(&mut self) -> Result<Arc<AttribDb>, SelectedLiveError> {
+        let mounts = Arc::clone(&self.inner.assets.as_ref().ok_or_else(|| error("free skate assets absent"))?.mounts);
+        if self.freeskate.data.is_none() {
+            let db = Arc::new(AttribDb::load(&mounts, &CAREER_VAULTS).map_err(error)?);
+            let table = LocationTable::parse(&mounts.read_path(SIM_LOCATIONS).map_err(error)?).map_err(error)?;
+            self.freeskate.data = Some((db, table));
+        }
+        Ok(Arc::clone(&self.freeskate.data.as_ref().expect("free skate data loaded").0))
     }
 
     /// The FreeSkate screen's intro finished (`FrontEndStateBase::OnIntroDone`).

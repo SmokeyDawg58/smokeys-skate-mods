@@ -145,6 +145,29 @@ impl fmt::Display for DmoSerialisedAssemblySelectError {
 impl Error for DmoSerialisedAssemblySelectError {}
 
 impl DmoBankProcessedArenaAsset {
+    /// PC park editor: an arena from outside the main bank (one of Skate 3's park editor props,
+    /// a standalone `.rx2` of the same RW4/Pegasus layout) built exactly as the bank builds each
+    /// of its arenas.
+    ///
+    /// # Errors
+    ///
+    /// The arena's collision, plan or Assembly templates cannot be projected.
+    pub(crate) fn try_from_decoded(decoded: crate::decoded_arena_asset::DecodedArenaAsset) -> Result<Self, DmoBankProcessedArenaBuildError> {
+        let collision = SimulationCollisionAsset::from_decoded(decoded).map_err(DmoBankProcessedArenaBuildError::Projection)?;
+        let plan = Arc::new(SimulationNormalArenaPlan::from_collision_asset(collision).map_err(DmoBankProcessedArenaBuildError::Plan)?);
+        let serialised_assemblies = SerialisedAssemblyTemplate::all_in_plan(&plan)
+            .map_err(|source| DmoBankProcessedArenaBuildError::SerialisedAssembly { reason: source.to_string() })?;
+        Ok(Self { plan, serialised_assemblies })
+    }
+
+    /// The arena's one template, when it holds exactly one.
+    pub(crate) fn only_serialised_assembly(&self) -> Option<&SerialisedAssemblyTemplate> {
+        match &self.serialised_assemblies[..] {
+            [template] => Some(template),
+            _ => None,
+        }
+    }
+
     /// Selects one dictionary-filtered template by exact raw local `ObjectId`.
     pub(crate) fn try_serialised_assembly_by_object_id(
         &self,

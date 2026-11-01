@@ -17,12 +17,23 @@ const DENSITY: f64 = 42.0;
 pub(crate) struct PresentationClock {
     previous:Option<std::time::Instant>, seconds:f64, report_seconds:f64,
     frames:u32,native_repeats:u32,native_previous:Option<f32>,
+    replay_phase:Option<f32>,
 }
 impl PresentationClock {
-    pub(crate) fn sample(&mut self,native:f32)->(f32,f32) {
+    pub(crate) fn sample(&mut self,native:f32, playback:crate::weather::Playback)->(f32,f32) {
         let now=std::time::Instant::now();
         let elapsed=self.previous.map_or(1.0/120.0,|last|now.saturating_duration_since(last).as_secs_f64());
-        self.previous=Some(now);self.advance(elapsed,native)
+        self.previous=Some(now);
+        self.drive(elapsed,native,playback)
+    }
+    fn drive(&mut self,elapsed:f64,native:f32,playback:crate::weather::Playback)->(f32,f32) {
+        if let Some(recorded)=playback.recorded {
+            let delta=self.replay_phase.map_or(0.,|previous| (recorded.phase-previous).clamp(-0.25,0.25));
+            self.replay_phase=Some(recorded.phase);
+            return (recorded.phase,delta);
+        }
+        self.replay_phase=None;
+        self.advance(if playback.running {elapsed}else{0.},native)
     }
     fn advance(&mut self,elapsed:f64,native:f32)->(f32,f32) {
         // A suspended/minimized renderer resumes locally, without catching up a
@@ -67,7 +78,7 @@ fn random(value: u32) -> f64 {
 impl Rain {
     pub(crate) fn vertices(&mut self,camera:&ParticleCamera,dt:f32,state:Snapshot,world:&World)->Vec<ParticleVertex>{
         if !camera.position.iter().all(|v|v.is_finite()){return Vec::new();}
-        let dt=if dt.is_finite(){dt.clamp(0.,0.25)}else{0.};
+        let dt=if dt.is_finite(){dt.clamp(-0.25,0.25)}else{0.};
         let previous_offset=self.offset;
         for(offset,velocity)in self.offset.iter_mut().zip(WIND){*offset+=f64::from(dt)*f64::from(velocity);}
         let elapsed=self.offset[1]/f64::from(WIND[1]);
@@ -120,7 +131,7 @@ impl Rain {
             }else if let Some(previous)=cached {previous}else{continue;};
             p.cover=Some(cover);
             if !cover.clear{p.visibility=0.;continue;}
-            p.visibility=(p.visibility+dt*6.).min(1.);
+            p.visibility=(p.visibility+dt.max(0.)*6.).min(1.);
             let along=dot(sub(point,cover.origin),fall)/dot(fall,fall);
             let variant=random(seed^0x02e5_be93)as f32;
             let length=(cover.until-along-0.015).min(0.22+0.54*variant);
@@ -215,6 +226,37 @@ mod tests {
     fn rain_resume_does_not_jump_a_suspended_interval() {
         let mut clock=PresentationClock::default();clock.advance(1.0/120.0,0.0);let(before,_)=clock.advance(1.0/120.0,0.0);let(after,delta)=clock.advance(20.0,0.0);
         assert!(delta>0.0&&delta<0.02&&after-before<0.02);
+    }
+    #[test]
+    fn short_replay_rewind_reverses_raindrop_motion() {
+        let mut rain=Rain::default();let world=World::default();let camera=camera([0.,2.,0.]);
+        let state=Snapshot{intensity:1.,time:20.,..Default::default()};
+        rain.vertices(&camera,0.,state,&world);
+        let before=rain.drops[0].point;
+        rain.vertices(&camera,0.01,Snapshot{time:20.01,..state},&world);
+        let forward=rain.drops[0].point;
+        assert!(forward[1]<before[1]);
+        rain.vertices(&camera,-0.01,state,&world);
+        let rewound=rain.drops[0].point;
+        assert!((rewound[1]-before[1]).abs()<0.00001);
+    }
+    #[test]
+    fn offline_pause_freezes_while_online_and_replay_follow_their_own_clocks() {
+        use crate::weather::{Mode,Playback,ReplayWeather};
+        let mut clock=PresentationClock::default();
+        let running=Playback{running:true,..Default::default()};
+        let paused=Playback{running:false,..Default::default()};
+        let (before,_)=clock.drive(0.02,1.,running);
+        let (held,delta)=clock.drive(0.10,1.,paused);
+        assert_eq!(held,before);assert_eq!(delta,0.);
+        let (after,delta)=clock.drive(0.02,1.,running);
+        assert!(after>held && delta>0.,"an online menu leaves weather running");
+        let replay=|phase|Playback{replay:true,running:false,recorded:Some(ReplayWeather{mode:Mode::HeavyRain,phase})};
+        assert_eq!(clock.drive(1.,1.,replay(12.5)),(12.5,0.));
+        assert_eq!(clock.drive(1.,1.,replay(12.5)),(12.5,0.));
+        assert_eq!(clock.drive(1.,1.,replay(4.0)),(4.0,-0.25));
+        let (forward,delta)=clock.drive(1.,1.,replay(4.1));
+        assert_eq!(forward,4.1);assert!(delta>0.09 && delta<0.11);
     }
     #[test]fn coherent_gust_changes_angle_without_unbounded_wind(){
         let mut max=0_f32;let mut min=100_f32;

@@ -43,8 +43,8 @@ pub(crate) fn advance(
         feedback,
         skater.centre_of_mass_output,
         CameraPreferences {
-            // User preferences are owned here: ordinary uninverted controls.
-            invert_look: [false; 2],
+            // Follow the same saved profile axes as the native Skate 2 camera.
+            invert_look: camera.invert_look(),
             // Native preferences constructor82DF6294/629C initializes both
             // fields to zero.82DF8E80 only updates its air-side bytes37..39.
             shake_variant: 0,
@@ -56,6 +56,10 @@ pub(crate) fn advance(
         output.tick,
     )?;
     let snapshot = crate::skate3_native::camera::publish_camera_subject(physics, skater, &inputs)?;
+    if std::env::var_os("SKATE2_DIAGNOSTIC_INVERT_CAMERA").is_some() && output.tick%30==0 {
+        eprintln!("offboard camera diagnostic tick={} category={:?} settings={:?} raw={:?} subject={:?}",
+            output.tick,skater.player_state.current(),camera.invert_look(),inputs.look_552_556,snapshot.subject.look);
+    }
     let environment = crate::skate3_native::camera::CameraGraphEnvironment {
         // The player's Camera Angle (or a mod's), synced by camera::angle::sync_runtime.
         camera_type: camera.camera_type(),

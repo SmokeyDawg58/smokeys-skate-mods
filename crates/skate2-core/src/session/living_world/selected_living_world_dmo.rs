@@ -133,6 +133,9 @@ enum Phase {
 
 pub(crate) struct SelectedLivingWorldDmo {
     phase: Phase,
+    /// PC park editor: Skate 3's props as DMO assets, registered after the bank's arenas
+    /// (`selected_session_park_assets::load_park_prop_assets`), held for the session.
+    park_props: Vec<Arc<DmoBankProcessedArenaAsset>>,
 }
 
 /// One spawned DMO as its `cPresDynamicObject` draws it. `CreatePresDynamicObject`
@@ -422,10 +425,20 @@ impl SelectedLivingWorldDmo {
         mounts: Arc<MountSet>,
         cvars: &InputCvarReferences,
     ) -> Result<Self, SelectedLivingWorldDmoError> {
-        let phase = if cvars
+        let enabled = cvars
             .try_enable_main_dmo_bank()
-            .map_err(SelectedLivingWorldDmoError::Cvar)?
-        {
+            .map_err(SelectedLivingWorldDmoError::Cvar)?;
+        // Read now, outside the world lock `try_register` runs under.
+        let park_props = if enabled {
+            let (assets, skipped) = crate::ui::object_dropper::load_park_prop_assets(&mounts);
+            if !skipped.is_empty() && !crate::diagnostics::is_quiet() {
+                eprintln!("Skate 3 props left static ({}): {}", skipped.len(), skipped.join("; "));
+            }
+            assets
+        } else {
+            Vec::new()
+        };
+        let phase = if enabled {
             Phase::Loading(Box::new(
                 SelectedDmoBankStartup::try_new(mounts)
                     .map_err(SelectedLivingWorldDmoError::Bank)?,
@@ -433,7 +446,7 @@ impl SelectedLivingWorldDmo {
         } else {
             Phase::Disabled
         };
-        Ok(Self { phase })
+        Ok(Self { phase, park_props })
     }
 
     /// One bank update; `Ok(true)` once the bank is held (or disabled).
@@ -476,9 +489,12 @@ impl SelectedLivingWorldDmo {
                 return Err(SelectedLivingWorldDmoError::AlreadyRegistered);
             }
         };
-        let assets = bank
+        let bank_assets = bank
             .assets()
             .ok_or(SelectedLivingWorldDmoError::BankPending)?;
+        // The bank's arenas, then Skate 3's props: one source binding (it is bound once).
+        let assets: Vec<Arc<DmoBankProcessedArenaAsset>> = bank_assets.iter().cloned().chain(self.park_props.iter().cloned()).collect();
+        let assets = assets.as_slice();
         let bindings = bank_source_bindings(assets)?;
         let image = SimulationXenonAddressImage::try_new(
             SIMULATION_IMAGE_BASE,
@@ -503,7 +519,10 @@ impl SelectedLivingWorldDmo {
             .lock()
             .map_err(|_| SelectedLivingWorldDmoError::LivingWorldLock)?;
         let mut unported = 0_usize;
-        for asset in assets {
+        let mut dynamic_props = Vec::new();
+        let mut static_props = Vec::new();
+        for (ordinal, asset) in assets.iter().enumerate() {
+            let park_prop = ordinal >= bank_assets.len();
             for (operation_index, operation) in asset.plan().operations().iter().enumerate() {
                 if !matches!(operation, SimulationNormalOperation::DmoInstance { .. }) {
                     continue;
@@ -512,12 +531,22 @@ impl SelectedLivingWorldDmo {
                     asset,
                     operation_index,
                 };
-                match living_world.dmo_models.try_add_dmo_model(
+                let added = living_world.dmo_models.try_add_dmo_model(
                     vault,
                     &source,
                     model_cvars,
                     &mut HostReckoningNumeric,
-                ) {
+                );
+                // A Skate 3 prop whose model does not build stays a static park piece.
+                if park_prop {
+                    let id = asset.plan().static_plan().asset().decoded.asset_id;
+                    match added {
+                        Ok(()) => dynamic_props.push(id),
+                        Err(error) => static_props.push(format!("{id:#x}: {error:?}")),
+                    }
+                    continue;
+                }
+                match added {
                     Ok(()) => {}
                     Err(
                         DmoModelError::UnportedFallback { .. }
@@ -532,9 +561,11 @@ impl SelectedLivingWorldDmo {
             eprintln!(
                 "LivingWorld DMO models: {} registered from {} bank arenas, {unported} with unported Create routes",
                 living_world.dmo_models.dmo_model_count(),
-                assets.len(),
+                bank_assets.len(),
             );
+            eprintln!("Skate 3 props: {} dynamic, {} left static{}", dynamic_props.len(), static_props.len(), if static_props.is_empty() { String::new() } else { format!(": {}", static_props.join("; ")) });
         }
+        crate::ui::object_dropper::publish_dynamic_park_props(dynamic_props);
         drop(living_world);
         self.phase = Phase::Registered {
             _bank: bank,
@@ -722,6 +753,22 @@ impl SelectedLivingWorldDmo {
         instance_guid: u64,
         transform: &[f32; 16],
     ) -> Result<bool, SelectedLivingWorldDmoError> {
+        self.try_drop_on_locator_as(world, actor, cvars, recipes, locator_id, instance_guid, transform, false)
+    }
+
+    /// `try_drop_on_locator`, static (an immovable body) when `fixed`.
+    #[allow(clippy::too_many_arguments, reason = "the drop's owners, locator, model, placement and kind stay distinct")]
+    pub(crate) fn try_drop_on_locator_as(
+        &mut self,
+        world: &mut PhysicalAssemblyWorld,
+        actor: &ActorConstruction,
+        cvars: &InputCvarReferences,
+        recipes: &crate::selected_living_world_recipes::SelectedRecipeFrame<'_>,
+        locator_id: u64,
+        instance_guid: u64,
+        transform: &[f32; 16],
+        fixed: bool,
+    ) -> Result<bool, SelectedLivingWorldDmoError> {
         let Some(vault) = self.registered_vault().map(Arc::clone) else {
             return Ok(false);
         };
@@ -733,7 +780,7 @@ impl SelectedLivingWorldDmo {
             let services = &mut DroppedLocatorServices;
             if !frame
                 .locators
-                .add_dropped_locator(locator_id, instance_guid, transform, services)
+                .add_dropped_locator(locator_id, instance_guid, transform, fixed, services)
                 .map_err(|e| SelectedLivingWorldDmoError::Pedestrians(format!("dropped locator: {e:?}")))?
             {
                 return Ok(false);
@@ -745,9 +792,9 @@ impl SelectedLivingWorldDmo {
         })
     }
 
-    /// PC park editor: every challenge type can keep its dropped props. A mode
-    /// with disabled census spawning needs an explicit respawn after a reset;
-    /// an enabled census retains its native distance and streaming decisions.
+    /// PC park editor, online: an online game's census spawns nothing, so a dropped prop its
+    /// living world reset culled (one placed before the game) comes out again here, where its
+    /// locator is now.
     pub(crate) fn try_respawn_dropped_locators(
         &mut self,
         world: &mut PhysicalAssemblyWorld,
@@ -761,9 +808,7 @@ impl SelectedLivingWorldDmo {
         };
         let census = census_cvars(cvars).map_err(SelectedLivingWorldDmoError::Cvar)?;
         Self::try_with_frame(world, &vault, actor, cvars, Some(recipes), |frame| {
-            if frame.census.enable & 0x80 != 0 {
-                return Ok(());
-            }
+            if frame.census.enable & 0x80 != 0 { return Ok(()); }
             for &locator_id in locators {
                 let Some(locator) = frame.locators.locator(locator_id) else { continue };
                 if locator.user_object_id != 0 {
@@ -822,6 +867,17 @@ impl SelectedLivingWorldDmo {
             .iter()
             .map(|&id| living.dmo_locators.as_deref().and_then(|all| all.locator(id)).is_some_and(|locator| locator.user_object_id != 0))
             .collect())
+    }
+
+    /// PC park editor: the object out on a dropped prop's locator (its entity ID, the session
+    /// marker's prop ID), if any.
+    pub(crate) fn dropped_locator_object(
+        world: &PhysicalAssemblyWorld,
+        locator: u64,
+    ) -> Result<Option<u32>, SelectedLivingWorldDmoError> {
+        let owner = Arc::clone(world.grind_services.living_world());
+        let living = owner.lock().map_err(|_| SelectedLivingWorldDmoError::LivingWorldLock)?;
+        Ok(living.dmo_locators.as_deref().and_then(|all| all.locator(locator)).map(|locator| locator.user_object_id).filter(|&id| id != 0))
     }
 
     /// PC Object Dropper: where each dropped prop's locator is now (its object keeps it up to

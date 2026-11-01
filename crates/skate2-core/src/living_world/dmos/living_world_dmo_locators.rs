@@ -1454,6 +1454,7 @@ impl DynamicObjectLocatorMan {
         locator_id: u64,
         model_id: u64,
         transform: &[f32; 16],
+        fixed: bool,
         services: &mut S,
     ) -> Result<bool, LocatorError<S::Error>> {
         if !matrix_valid(transform) {
@@ -1471,7 +1472,9 @@ impl DynamicObjectLocatorMan {
             return Ok(false);
         };
         let flags = &mut self.blocks[usize::from(block)].as_mut().expect("created locator block").flags;
-        *flags = (*flags & CHUNK_FLAG_KEEP) | LOCATOR_ENABLED;
+        // A static prop (the park editor's per-prop setting) spawns as a static body, as a
+        // locator of a treat-as-static stream does.
+        *flags = (*flags & CHUNK_FLAG_KEEP) | LOCATOR_ENABLED | if fixed { LOCATOR_STATIC } else { 0 };
         Ok(true)
     }
 

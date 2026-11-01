@@ -81,6 +81,8 @@ pub(crate) struct SelectedPlayerTick {
     #[cfg(feature = "skate3-runtime")]
     camera_type: i32,
     #[cfg(feature = "skate3-runtime")]
+    camera_invert_look: [bool; 2],
+    #[cfg(feature = "skate3-runtime")]
     previous_offboard_button: bool,
     hand_tokens: BlendPoseTokenPool,
     // Simulation.mTick/mVisualTick, advanced at SimUpdate1, not rendering.
@@ -411,6 +413,8 @@ impl SelectedPlayerTick {
             active_difficulty: None,
             #[cfg(feature = "skate3-runtime")]
             camera_type: 1,
+            #[cfg(feature = "skate3-runtime")]
+            camera_invert_look: [false; 2],
             #[cfg(feature = "skate3-runtime")]
             previous_offboard_button: false,
             hand_tokens: BlendPoseTokenPool::new(),

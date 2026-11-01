@@ -239,6 +239,9 @@ pub(crate) struct HostBodies {
     /// This tick's riderless boards, each solved as one rigid solid (keyed by
     /// its deck's ID): every Part and its offset from the board's centre of mass.
     rigid: Vec<(u64, Vec<(SimulationRigidBodyObservation, [f32; 3])>)>,
+    /// PC park editor: each placed mission prop's collider and local triangles, built once per
+    /// shape (id, shape key, collider, generation, triangles).
+    mission_colliders: Vec<(u64, usize, SharedShape, u64, Arc<[LocalTriangle]>)>,
 }
 impl HostBodies {
     pub(crate) fn body(&self, id: u64) -> Option<SimulationRigidBodyObservation> {
@@ -382,6 +385,67 @@ fn mesh_shape(mesh: &CollisionMesh) -> Result<SharedShape, String> {
     }
     SharedShape::trimesh(vertices, indices).map_err(|e| format!("Host collision trimesh: {e}"))
 }
+/// A placed mission prop: a body nothing moves (no inverse mass or inertia) whose board, wheel
+/// and skeleton contacts and line queries use its cut mesh at the placement.
+fn mission_prop_body(
+    host: &mut HostBodies,
+    placement: &crate::ui::object_dropper::MissionPlacement,
+    material: RetailContactMaterial,
+) -> Result<(SolidBody, Skate3MeshBody), String> {
+    let shape = &placement.shape;
+    if shape.triangles.is_empty() || shape.triangles.len() != shape.features.len() {
+        return Err("Mission prop has no complete native features".into());
+    }
+    let key = std::sync::Arc::as_ptr(shape) as usize;
+    let generation = host.mesh_generation;
+    let (collider_shape, locals) = if let Some(entry) = host.mission_colliders.iter_mut().find(|entry| entry.0 == placement.id && entry.1 == key) {
+        entry.3 = generation;
+        (entry.2.clone(), Arc::clone(&entry.4))
+    } else {
+        let locals: Arc<[LocalTriangle]> = shape
+            .triangles
+            .iter()
+            .zip(&shape.features)
+            .map(|(triangle, feature)| LocalTriangle {
+                vertices: triangle.vertices,
+                surface: u32::from(triangle.surface_id.unwrap_or(0)),
+                flags: feature.flags,
+                edge_cosines: feature.edge_cosines,
+            })
+            .collect();
+        let mut vertices = Vec::with_capacity(locals.len() * 3);
+        let mut indices = Vec::with_capacity(locals.len());
+        for triangle in locals.iter() {
+            let start = u32::try_from(vertices.len()).map_err(|e| e.to_string())?;
+            vertices.extend(triangle.vertices.map(Vector::from_array));
+            indices.push([start, start + 1, start + 2]);
+        }
+        let built = SharedShape::trimesh(vertices, indices).map_err(|e| format!("Mission prop trimesh: {e}"))?;
+        host.mission_colliders.retain(|entry| entry.0 != placement.id);
+        host.mission_colliders.push((placement.id, key, built.clone(), generation, Arc::clone(&locals)));
+        (built, locals)
+    };
+    let triangles = host.placed(placement.id, &placement.transform, std::slice::from_ref(&locals), material)?;
+    let at = pose(placement.transform)?;
+    let center = Vector::new(placement.transform[12], placement.transform[13], placement.transform[14]);
+    let body = SolidBody {
+        id: placement.id,
+        pose: at,
+        center_of_mass: center,
+        inertia_rotation: at.rotation,
+        inverse_mass: 0.,
+        inverse_inertia: Vector::ZERO,
+        linvel: Vector::ZERO,
+        angvel: Vector::ZERO,
+        contact_group: MISSION_PROP_GROUP,
+        colliders: vec![SolidCollider { shape: collider_shape, pose: at, friction: material.dynamic_friction }],
+    };
+    Ok((body, Skate3MeshBody { id: placement.id, triangles }))
+}
+
+/// Mission props collide as the heavy DMO group (`GROUP_HEAVY`).
+const MISSION_PROP_GROUP: u32 = 14;
+
 fn pose(transform: [f32; 16]) -> Result<Pose, String> {
     if transform.iter().any(|v| !v.is_finite()) {
         return Err("Non-finite host collider transform".into());
@@ -692,10 +756,18 @@ impl<C> SimulationAssemblyConstraintSession<skate2_formats::collision::AssemblyP
                 meshes.push(Skate3MeshBody { id, triangles });
             }
         }
+        // PC park editor: placed mission props, immovable bodies carrying only their cut mesh.
+        for placement in crate::ui::object_dropper::mission_placements().iter() {
+            let (body, mesh) = mission_prop_body(host, &placement, material)?;
+            solids.push(body);
+            meshes.push(mesh);
+        }
         host.meshes
             .retain(|entry| entry.generation == host.mesh_generation);
         host.placed
             .retain(|entry| entry.generation == host.mesh_generation);
+        host.mission_colliders
+            .retain(|entry| entry.3 == host.mesh_generation);
         Ok(Skate3Bodies { solids, meshes })
     }
     fn append_skate3_bodies(
@@ -809,6 +881,10 @@ impl<C> SimulationAssemblyConstraintSession<skate2_formats::collision::AssemblyP
                         .rigid_bodies
                         .try_apply_external_reaction(body, part)?;
                 }
+                continue;
+            }
+            // A placed mission prop is immovable: nothing to apply.
+            if crate::ui::object_dropper::is_mission_body(reaction.id) {
                 continue;
             }
             let body = host

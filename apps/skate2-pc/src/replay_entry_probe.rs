@@ -70,6 +70,12 @@ impl Probe {
                     return Ok(sample);
                 }
                 self.ready_ticks+=1;
+                if std::env::var_os("SKATE2_DIAGNOSTIC_WEATHER_REPLAY_SHORT").is_some() && self.ready_ticks==130 {
+                    let weather=session.replay_weather().ok_or("replay omitted recorded weather")?;
+                    eprintln!("REPLAY_WEATHER_TEST restored mode={:?} phase={:.3}",weather.mode,weather.phase);
+                    self.done=true;
+                    return Ok(sample);
+                }
                 match self.ready_ticks {
                     1..=60=>sample.right_trigger=255,
                     61=>{self.forward_parameter=Some(editor.parameter);eprintln!("REPLAY_TEST forward parameter={}",editor.parameter);},

@@ -563,9 +563,17 @@ pub fn sweep_sphere(
     }
     let shape = SharedShape::ball(radius.max(0.0001));
     let pose = Pose::from_translation(start);
+    // The swept ball's box: a collider whose box misses it cannot be hit, so skip its cast.
+    let end = start + delta;
+    let reach = radius.max(0.0001) + 1.0e-3;
+    let (sweep_min, sweep_max) = (start.min(end) - Vector::splat(reach), start.max(end) + Vector::splat(reach));
     let mut nearest: Option<(u64, SolidContact)> = None;
     for body in bodies {
         for collider in &body.colliders {
+            let aabb = collider.shape.compute_aabb(&collider.pose);
+            if aabb.mins.cmpgt(sweep_max).any() || aabb.maxs.cmplt(sweep_min).any() {
+                continue;
+            }
             let options = ShapeCastOptions {
                 max_time_of_impact: 1.,
                 target_distance: 0.,

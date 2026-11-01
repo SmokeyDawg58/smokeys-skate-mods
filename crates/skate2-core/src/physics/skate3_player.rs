@@ -17,7 +17,7 @@ use crate::skate3_native::{
 #[path = "skate3_terrain.rs"]
 pub(crate) mod terrain;
 #[path = "skate3_grinds.rs"]
-mod grinds;
+pub(crate) mod grinds;
 #[path = "skate3_grabs.rs"]
 mod grabs;
 #[path = "player/skate3_exit.rs"]
@@ -885,6 +885,7 @@ impl Skate3Player {
     }
     pub(crate) fn set_online_scoring(&mut self, online: bool) { self.skater.scoring.online_game = online; }
     pub(crate) fn set_camera_type(&mut self, value: u32) { self.camera.set_camera_type(value); }
+    pub(crate) fn set_camera_invert_look(&mut self, value: [bool; 2]) { self.camera.set_invert_look(value); }
     pub(crate) fn set_airtime_slow_motion(&mut self, enabled: bool) { self.airtime_slow_motion = enabled; }
     /// Diagnostic only: signed wheel-sphere gap against the actual loaded
     /// collision surface. Queries do not move a body or modify solver state.

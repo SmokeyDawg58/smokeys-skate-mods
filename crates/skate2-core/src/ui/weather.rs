@@ -1,6 +1,6 @@
 //! PC weather preferences shared by the native menus, renderer and ambience mixer.
 use super::online_config::{quote, strict_string_fields};
-use std::{path::PathBuf, sync::{OnceLock, atomic::{AtomicBool, AtomicU16, Ordering}}};
+use std::{path::PathBuf, sync::{OnceLock, atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering}}};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
@@ -10,8 +10,16 @@ impl Mode {
     pub fn label(self) -> &'static str { ["Clear", "Light Rain", "Medium Rain", "Heavy Rain", "Light Snow", "Heavy Snow", "30 min after rain"][self as usize] }
     pub fn amounts(self) -> [f32; 2] { match self { Self::Clear | Self::AfterRain => [0.,0.], Self::LightRain => [0.35,0.], Self::MediumRain => [0.65,0.], Self::HeavyRain => [1.,0.], Self::LightSnow => [0.,0.35], Self::HeavySnow => [0.,1.] } }
     fn from_index(index: u8) -> Self { [Self::Clear, Self::LightRain, Self::MediumRain, Self::HeavyRain, Self::LightSnow, Self::HeavySnow, Self::AfterRain][usize::from(index)] }
+    pub fn from_recorded(index:u8)->Option<Self> { (index<7).then(||Self::from_index(index)) }
     fn parse(key: &str) -> Result<Self, String> { (0..7).map(Self::from_index).find(|m| m.key() == key).ok_or_else(|| format!("Unknown weather mode {key:?}")) }
 }
+/// The last weather phase actually shown by the renderer, captured alongside
+/// simulation replay frames. It is independent of user audio preferences.
+static RENDERED_PHASE:AtomicU32=AtomicU32::new(0);
+pub fn set_rendered_phase(value:f32) {if value.is_finite() {RENDERED_PHASE.store(value.to_bits(),Ordering::Relaxed);}}
+pub fn rendered_phase()->f32 {f32::from_bits(RENDERED_PHASE.load(Ordering::Relaxed))}
+#[derive(Clone,Copy,Debug,PartialEq)]
+pub struct ReplayWeather {pub mode:Mode,pub phase:f32}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Config { mode: Mode, rain_steps: u8 }
 impl Default for Config { fn default() -> Self { Self { mode: Mode::Clear, rain_steps: 10 } } }

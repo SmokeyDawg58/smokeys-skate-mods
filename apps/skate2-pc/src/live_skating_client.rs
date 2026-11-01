@@ -1197,7 +1197,6 @@ impl LiveSkatingClient {
             && !self.completion_reached()
             && (simulating || !self.session.pause_menu_snapshot().visible)
             && !self.session.replay_editor_open()
-            && !self.session.object_dropper_open()
             && (simulating
                 || self.session.options_snapshot().page
                     == skate2_core::ui::options::Page::Hidden)
@@ -2548,9 +2547,21 @@ impl LiveSkatingClient {
                     && self.session.edit_skater_view()?.is_none() {
                     sample.buttons = if pause.options()[pause.selected] == skate2_core::ui::pause_menu::PauseMenuOption::EditSkater { 0x1000 } else { 0x0002 };
                 }
-                if matches!(demo, ControlsDemo::EditSkaterCouch | ControlsDemo::EditSkaterStyles | ControlsDemo::EditSkaterRemoveShirt) {
+                if matches!(demo, ControlsDemo::EditSkaterCouch | ControlsDemo::EditSkaterStyles | ControlsDemo::EditSkaterRemoveShirt)
+                    && std::env::var_os("SKATE2_DIAGNOSTIC_STYLE_SCROLL").is_none() {
                     if tick == 660 { sample.buttons = 0x0002; }
                     if tick == 690 { sample.buttons = 0x1000; }
+                }
+                if std::env::var_os("SKATE2_DIAGNOSTIC_STYLE_SCROLL").is_some() && tick>=620 && tick%30==0 {
+                    use skate2_core::ui::edit_skater::EditSkaterMenu as M;
+                    if let Some(view)=self.session.edit_skater_view()? {
+                        sample.buttons=match view.menu {
+                            M::EditSkaterMain => if view.selected==2 {0x1000}else{0x0002},
+                            M::EditSkaterStyle if view.selected<7 => 0x0002,
+                            M::EditSkaterStyle => {eprintln!("STYLE_SCROLL_TEST selected={} rows={}",view.selected,view.rows.len());0},
+                            _=>0,
+                        };
+                    }
                 }
                 if matches!(demo, ControlsDemo::EditSkaterStyles) && tick >= 750 && tick % 30 == 0 {
                     use skate2_core::ui::edit_skater::EditSkaterMenu as M;
@@ -2619,6 +2630,41 @@ impl LiveSkatingClient {
             }
             if matches!(demo, ControlsDemo::PedestrianApproach) && self.completed_frames >= 3000 {
                 [sample.left_x, sample.left_y] = self.pedestrian_approach_stick;
+            }
+            if matches!(demo,ControlsDemo::PostfxSunLook) && std::env::var_os("SKATE2_DIAGNOSTIC_INVERT_CAMERA_SWITCH").is_some() {
+                use skate2_core::ui::{options::{Page,Row},pause_menu::PauseMenuOption};
+                static INITIAL:std::sync::OnceLock<bool>=std::sync::OnceLock::new();
+                static SWITCHED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
+                let initial=*INITIAL.get_or_init(||self.session.profile_settings().invert_y);
+                let switched=SWITCHED.load(Ordering::Relaxed);
+                sample=neutral_demo_sample();sample.buttons=0;
+                if self.completed_frames==32 {sample.buttons=0x8000;}
+                if (150..220).contains(&self.completed_frames) || (switched && (260..340).contains(&self.completed_frames)) {sample.right_y=-18000;}
+                if self.completed_frames>=240 && !switched {
+                    self.frontend_demo_ticks+=1;
+                    let pause=self.session.pause_menu_snapshot();let options=self.session.options_snapshot();
+                    let changed=self.session.profile_settings().invert_y!=initial;
+                    if changed && !pause.visible && options.page==Page::Hidden {
+                        SWITCHED.store(true,Ordering::Relaxed);
+                        eprintln!("CAMERA_SWITCH_TEST changed profile in one session: {initial} -> {}",!initial);
+                    } else if self.frontend_demo_ticks%30==0 {
+                        sample.buttons=match options.page {
+                            Page::Control if !changed => 0x0008,
+                            Page::Control => 0x2000,
+                            Page::Options if changed => 0x2000,
+                            Page::Options => if options.rows()[options.selected]==Row::ControlSettings {0x1000}else{0x0002},
+                            Page::Hidden if pause.visible => if changed {0x2000} else if pause.options()[pause.selected]==PauseMenuOption::Settings {0x1000}else{0x0002},
+                            Page::Hidden => 0x0010,
+                            _ => 0,
+                        };
+                    }
+                }
+            }
+            if std::env::var_os("SKATE2_DIAGNOSTIC_ONLINE_WEATHER").is_some() && self.session.weather_online_game() {
+                static TICKS:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+                let tick=TICKS.fetch_add(1,Ordering::Relaxed);
+                sample=neutral_demo_sample();
+                sample.buttons=match tick {60=>0x0010, 160=>0x2000, 210=>0x0020, 310=>0x2000, _=>0};
             }
             if let Some(probe)=self.replay_probe.as_mut() {sample=probe.input(&self.session,self.completed_frames)?;}
             if let Some(probe)=self.local_review_probe.as_mut() {
@@ -3165,6 +3211,32 @@ impl LiveSkatingClient {
         now: Instant,
         backlog_slack: u128,
     ) -> RenderResult<bool> {
+        let replay=self.session.replay_restorer().is_some() || self.session.replay_editor_open();
+        let (_, rate)=self.session.audio_playback();
+        // Online games continue simulating under StartHub and Options; offline
+        // pauses hold weather with the rest of the world.
+        let paused_offline = !self.session.weather_online_game()
+            && (self.session.audio_paused() || self.session.pause_menu_snapshot().visible
+                || self.session.online_hub_open());
+        crate::weather::set_playback(crate::weather::Playback {
+            replay, running:if replay {rate.abs()>0.0001} else {!paused_offline},
+            recorded:if replay {self.session.replay_weather()} else {None},
+        });
+        if std::env::var_os("SKATE2_DIAGNOSTIC_ONLINE_WEATHER").is_some() && self.session.weather_online_game() {
+            static FRAMES:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+            if FRAMES.fetch_add(1,Ordering::Relaxed)%30==0 {
+                eprintln!("ONLINE_WEATHER_TEST pause={} hub={} running={} phase={}",self.session.pause_menu_snapshot().visible,self.session.online_hub_open(),crate::weather::playback().running,crate::weather::rain_clock());
+            }
+        }
+        if std::env::var_os("SKATE2_DIAGNOSTIC_INVERT_CAMERA_SWITCH").is_some()
+            && [150,180,210,270,300,330].contains(&self.completed_frames) {
+            static LAST:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(u64::MAX);
+            if LAST.swap(self.completed_frames,Ordering::Relaxed)!=self.completed_frames
+                && let Ok(visual)=self.session.try_visual_snapshot() {
+                eprintln!("CAMERA_SWITCH_VIEW tick={} invert={} forward={:?}",self.completed_frames,
+                    self.session.profile_settings().invert_y,visual.camera_forward);
+            }
+        }
         // PC: the update for the main menu's popup, and what the popup asked of the updater.
         if let Some(update) = self.update.as_mut() {
             if let Some(request) = self.session.take_update_request() {
@@ -3353,7 +3425,8 @@ impl LiveSkatingClient {
             changed=true;view.update_trick_guide(renderer,scene,now,&guide,&guide_pause)?;
             self.accumulator=Duration::from_nanos(u64::try_from(self.accumulator.as_nanos()%self.step.as_nanos()).expect("frontend fraction"));
         } else if self.session.object_dropper_open() {
-            // PC Object Dropper: the frozen world through its fly camera, no simulation.
+            // PC park editor: the world (simulated on the SIM thread, as in play) through its fly
+            // camera.
             changed=true;
             let pause=self.session.pause_menu_snapshot();
             let map=self.session.map_menu_snapshot();
@@ -4088,8 +4161,10 @@ impl RenderWindowClient for LiveSkatingWindow {
         self.frame_timings = client.frame_timings;
         self.idle = scene.unchanged;
         // A tick shown through the restore draws the restored moment of this frame; the
-        // pacing of whole ticks does not apply.
-        if !wake {
+        // pacing of whole ticks does not apply. The PC park editor's world simulates on the SIM
+        // thread too, but draws through the editor's camera, which the restore (the game
+        // camera's) does not know: each frame draws the editor's view of the last tick.
+        if !wake || client.session.object_dropper_open() {
             self.restorer.reset();
         }
         let pending_draw = self.view.take_pending_draw();

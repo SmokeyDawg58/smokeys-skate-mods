@@ -1,5 +1,9 @@
 # Building Smokey's mod
 
+For the debug-camera and park-editor update, the pool grid and player inputs are still external build inputs described below. Set `SKATE3_PARK_ASSETS` to your own Skate 3 `data/content/parkassets.big` when building the complete mod; the prepared distribution embeds it. A source build without this input does not include those pieces. Keep all game-derived inputs out of the repository.
+
+The Update 42 extractor instructions below remain useful for obtaining the existing pool-grid and player inputs from that specific release; they do not extract the newer park archive.
+
 This is the public source snapshot for **Update 42**, based on the Skate 2 Rust Port **0.2.9** source at `5000b47437a7d9fc076613d9519ed9e82d5aabb6`. The tested private integration was `9ba85fd628345e4bbf9b306631a4df9eebf0172f`.
 
 The public snapshot changes the pool-ground input from a checked-in game-derived binary to an external build input, and adds project documentation. With the same input bytes the pool code receives the same grid; no physics or renderer algorithm was intentionally changed for this source publication. The published EXE was validated against the integration snapshot, not built again from this documentation commit.

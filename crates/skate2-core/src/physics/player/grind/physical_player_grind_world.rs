@@ -131,7 +131,68 @@ impl PhysicalGrindServices {
     pub(crate) fn living_world(&self) -> &Arc<Mutex<LivingWorldGrindServices>> {
         &self.living_world
     }
+    /// The world's grind splines in the box (`try_box_test_world`), then the PC park editor's
+    /// placed pieces' (their splines at each placement, as a dropped prop's are queried) and
+    /// dropped grind boards' (at their decks).
     pub(crate) fn try_box_test(
+        &self,
+        bounds: OctreeBounds,
+        result: &mut GrindDataQueryResult,
+        ignore_vertical: bool,
+        cvars: &InputCvarReferences,
+    ) -> Result<bool, PhysicalGrindError> {
+        let found = self.try_box_test_world(bounds, result, ignore_vertical, cvars)?;
+        let difference: [f32; 3] = std::array::from_fn(|lane| bounds.minimum[lane] - bounds.maximum[lane]);
+        // The world query's own extent gate: a degenerate box finds nothing.
+        if difference.iter().map(|d| d * d).sum::<f32>() <= f32::from_bits(0x3780_0000) {
+            return Ok(found);
+        }
+        for placement in crate::ui::object_dropper::mission_placements().iter() {
+            let Some((low, high)) = placement.shape.grind_bounds else {
+                continue;
+            };
+            let (minimum, maximum) = crate::world::transform_collision_aabb(low, high, placement.transform);
+            if (0..3).any(|axis| bounds.minimum[axis] > maximum[axis] || minimum[axis] > bounds.maximum[axis]) {
+                continue;
+            }
+            // No reach gate: a piece's bounds already were (a mega ramp is far bigger than a
+            // DMO's `kMaxDynamicObjectSize`).
+            let room = crate::living_world_grind_services::provider::query_entity_grind_splines(
+                crate::living_world_grind_services::provider::EntityKind::Dmo,
+                u32::try_from(placement.id & 0xffff_ffff).unwrap_or(u32::MAX),
+                &placement.transform,
+                placement.shape.grind_splines.iter(),
+                &bounds,
+                [placement.transform[12], placement.transform[13], placement.transform[14], 1.0],
+                f32::INFINITY,
+                result,
+            )
+            .map_err(|e| PhysicalGrindError::Query(GrindDataQueryError::Dynamic(DynamicProviderError::LivingWorld(e))))?;
+            if !room {
+                return Ok(true);
+            }
+        }
+        // Then the dropped grind boards' deck edges, at their decks.
+        for &(id, deck) in crate::ui::object_dropper::grind_boards().iter() {
+            let room = crate::living_world_grind_services::provider::query_entity_grind_splines(
+                crate::living_world_grind_services::provider::EntityKind::Dmo,
+                id,
+                &deck,
+                crate::ui::object_dropper::grind_board_splines().iter(),
+                &bounds,
+                [deck[12], deck[13], deck[14], 1.0],
+                f32::INFINITY,
+                result,
+            )
+            .map_err(|e| PhysicalGrindError::Query(GrindDataQueryError::Dynamic(DynamicProviderError::LivingWorld(e))))?;
+            if !room {
+                break;
+            }
+        }
+        Ok(result.count() != 0)
+    }
+
+    fn try_box_test_world(
         &self,
         bounds: OctreeBounds,
         result: &mut GrindDataQueryResult,

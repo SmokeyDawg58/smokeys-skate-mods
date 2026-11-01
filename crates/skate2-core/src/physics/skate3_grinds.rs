@@ -12,9 +12,25 @@ pub(super) struct HostGrinds {
     props: Vec<CachedProp>,
     /// Ticks before a MOVING prop may rebuild the grind world again.
     prop_cooldown: u32,
+    /// PC park editor: the placed pieces' splines, by placement, and the publication of the
+    /// placements they were built from.
+    mission: Vec<CachedProp>,
+    mission_generation: Option<u64>,
+    /// The world's own grind provider (its streamed sources only), for `sources`: the park
+    /// editor's props, pieces and boards are added on top of it (`with_host`) without
+    /// building the world's octrees again each time one moves.
+    world_provider: Option<crate::skate3_native::grind_world::StaticProvider>,
+    /// PC park editor: the dropped grind boards' deck edges, by board and deck.
+    boards: Vec<CachedProp>,
+    /// Ticks before a MOVING grind board may rebuild the grind world again.
+    board_cooldown: u32,
     initialized: bool,
     next_handle: u64,
 }
+
+/// Test measurement: how many times the grind world was rebuilt, and the milliseconds spent.
+#[cfg(test)]
+pub(crate) static REBUILDS: std::sync::Mutex<(u32, f64)> = std::sync::Mutex::new((0, 0.0));
 
 /// Dropped props are dynamic: one pushed along re-places its rails at most
 /// this often (and once more when it comes to rest), not every tick.
@@ -64,16 +80,22 @@ impl HostGrinds {
         skater: &mut crate::skate3_native::physics::Skate3ControllerState,
     ) -> Result<(), String> {
         let props = self.prop_assets(world)?;
+        let mission = self.mission_assets()?;
+        let boards = self.board_assets()?;
         let owner = world
             .grind_services
             .static_data()
             .lock()
             .map_err(|_| "Host grind data lock")?;
-        if self.initialized && props.is_none() && owner.matches_skate3_sources(&self.sources)? {
+        let same_sources = self.initialized && owner.matches_skate3_sources(&self.sources)?;
+        if same_sources && props.is_none() && !mission && boards.is_none() {
             return Ok(());
         }
         if let Some(props) = props {
             self.props = props;
+        }
+        if let Some(boards) = boards {
+            self.boards = boards;
         }
         let sources = owner.skate3_sources()?;
         drop(owner);
@@ -81,13 +103,22 @@ impl HostGrinds {
         if !self.initialized && std::env::var_os("SKATE2_AUDIT_GRIND_STREAMING").is_some() {
             audit_cached_sources(&sources)?;
         }
+        #[cfg(test)]
+        let rebuild_started = std::time::Instant::now();
         let conversion_started = std::time::Instant::now();
-        let mut assets = self.assets(&sources)?;
+        if !same_sources || self.world_provider.is_none() {
+            let world = self.assets(&sources)?;
+            self.world_provider = Some(crate::skate3_native::grind_world::StaticProvider::from_host(&world)?);
+        }
+        let mut assets = Vec::new();
         assets.extend(self.props.iter().filter_map(|prop| prop.asset.clone()));
+        assets.extend(self.mission.iter().filter_map(|piece| piece.asset.clone()));
+        assets.extend(self.boards.iter().filter_map(|board| board.asset.clone()));
         let conversion_ms = conversion_started.elapsed().as_secs_f64() * 1000.;
         let provider_started = std::time::Instant::now();
+        let world_provider = self.world_provider.as_ref().ok_or("Host grind world provider absent")?;
         let provider = std::sync::Arc::new(
-            crate::skate3_native::grind_world::StaticProvider::from_host(&assets)?,
+            crate::skate3_native::grind_world::StaticProvider::with_host(world_provider, &assets)?,
         );
         crate::diagnostics::test_log::event(
             "skate3_grind_refresh",
@@ -95,10 +126,7 @@ impl HostGrinds {
                 "sources={} props={} segments={} conversion_ms={conversion_ms:.3} provider_ms={:.3}",
                 sources.len(),
                 self.props.len(),
-                assets
-                    .iter()
-                    .map(|asset| asset.segments.len())
-                    .sum::<usize>(),
+                provider.primitives().len(),
                 provider_started.elapsed().as_secs_f64() * 1000.
             ),
         );
@@ -106,6 +134,11 @@ impl HostGrinds {
             .trajectory
             .bind_grind_world(std::sync::Arc::clone(&provider));
         physics.grind_world = provider;
+        #[cfg(test)]
+        if let Ok(mut rebuilds) = REBUILDS.lock() {
+            rebuilds.0 += 1;
+            rebuilds.1 += rebuild_started.elapsed().as_secs_f64() * 1000.0;
+        }
         self.sources = sources;
         self.initialized = true;
         Ok(())
@@ -118,6 +151,61 @@ struct CachedSource {
 }
 
 impl HostGrinds {
+    /// PC park editor: the placed pieces' grind splines at their placements, when the
+    /// placements were published again since (true: they changed). A piece still where it was
+    /// keeps its converted segments and owner handles.
+    fn mission_assets(&mut self) -> Result<bool, String> {
+        let generation = crate::ui::object_dropper::mission_generation();
+        if self.mission_generation == Some(generation) {
+            return Ok(false);
+        }
+        let mut previous = std::mem::take(&mut self.mission);
+        for placement in crate::ui::object_dropper::mission_placements().iter() {
+            if placement.shape.grind_splines.is_empty() {
+                continue;
+            }
+            let key = (u32::try_from(placement.id & 0xffff_ffff).unwrap_or(u32::MAX), placement.transform);
+            if let Some(index) = previous.iter().position(|cached| cached.key == key) {
+                self.mission.push(previous.swap_remove(index));
+                continue;
+            }
+            let asset = convert_prop(&placement.transform, placement.shape.grind_splines.iter(), &mut self.next_handle)?;
+            self.mission.push(CachedProp { key, asset });
+        }
+        self.mission_generation = Some(generation);
+        Ok(true)
+    }
+
+    /// PC park editor: the dropped grind boards' deck edges at their decks; `None` when nothing
+    /// needs rebuilding. As with props, a board kept in place keeps its segments and a moving
+    /// one is re-placed at most every `MOVING_PROP_REBUILD_TICKS`.
+    fn board_assets(&mut self) -> Result<Option<Vec<CachedProp>>, String> {
+        let boards = crate::ui::object_dropper::grind_boards();
+        let same = |a: &(u32, [f32; 16]), b: &(u32, [f32; 16])| {
+            a.0 == b.0 && crate::simulation_assembly_backend::constraint_session::skate3_world::same_prop_placement(&a.1, &b.1)
+        };
+        self.board_cooldown = self.board_cooldown.saturating_sub(1);
+        let same_set = self.boards.len() == boards.len()
+            && self.boards.iter().zip(boards.iter()).all(|(cached, key)| cached.key.0 == key.0);
+        if same_set
+            && (self.board_cooldown > 0 || self.boards.iter().zip(boards.iter()).all(|(cached, key)| same(&cached.key, key)))
+        {
+            return Ok(None);
+        }
+        self.board_cooldown = MOVING_PROP_REBUILD_TICKS;
+        let mut previous = std::mem::take(&mut self.boards);
+        let mut rebuilt = Vec::with_capacity(boards.len());
+        for &key in boards.iter() {
+            if let Some(index) = previous.iter().position(|cached| same(&cached.key, &key)) {
+                rebuilt.push(previous.swap_remove(index));
+                continue;
+            }
+            let asset = convert_prop(&key.1, crate::ui::object_dropper::grind_board_splines().iter(), &mut self.next_handle)?;
+            rebuilt.push(CachedProp { key, asset });
+        }
+        Ok(Some(rebuilt))
+    }
+
     /// PC Object Dropper props' embedded grind splines at their current
     /// (physical) target transforms; `None` when nothing needs rebuilding. A
     /// prop kept in place keeps its converted segments and owner handles; a

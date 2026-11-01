@@ -599,6 +599,9 @@ pub struct SceneCharacter {
     /// The render entity's `m_MatLtoW`, which `EvalCurrAnim` sets through
     /// `SetObjectTransform` (`0x82865fd0`).
     object: Option<AnimationMatrix>,
+    /// PC park editor: the clip plays in place, its travel dropped and its hips kept over the
+    /// placement (a NIS scene's clip carries its scene's position).
+    pub in_place: bool,
 }
 
 impl SceneCharacter {
@@ -615,7 +618,7 @@ impl SceneCharacter {
             transform: user_transform,
             anim,
             trajectory_inverse_bind: None,
-            object: None,
+            object: None, in_place: false,
         }
     }
 
@@ -641,6 +644,17 @@ impl SceneCharacter {
         self.user_transform =
             [cos, 0.0, -sin, 0.0, 0.0, 1.0, 0.0, 0.0, sin, 0.0, cos, 0.0, position[0], position[1], position[2], 1.0];
         self.transform = self.user_transform;
+    }
+
+    /// PC park editor: the character placed by a full matrix (row major, translation last), its
+    /// tilts kept as well as its heading.
+    ///
+    /// # Errors
+    /// The clip's evaluation (the object matrix follows at once, frozen clip or not).
+    pub fn set_viewer_matrix(&mut self, matrix: [f32; 16]) -> Result<(), String> {
+        self.user_transform = matrix;
+        self.transform = matrix;
+        self.update_object()
     }
 
     /// `SceneCharacter::SetTime` (`0x82862080`): the clip at `time`, then
@@ -686,8 +700,19 @@ impl SceneCharacter {
 
     fn update_object(&mut self) -> Result<(), String> {
         if let Some(inverse_bind) = self.trajectory_inverse_bind {
-            let trajectory = multiply_matrices(self.global_pose()?[self.anim.trajectory], inverse_bind);
-            self.object = Some(compose_object(self.transform, trajectory, self.anim.hips_matrix, self.anim.hips_translation).root);
+            let mut trajectory = multiply_matrices(self.global_pose()?[self.anim.trajectory], inverse_bind);
+            if self.in_place {
+                trajectory[12] = 0.0;
+                trajectory[13] = 0.0;
+                trajectory[14] = 0.0;
+            }
+            let mut root = compose_object(self.transform, trajectory, self.anim.hips_matrix, self.anim.hips_translation).root;
+            if self.in_place {
+                // Over the placement across the ground; the clip's own height stays.
+                root[12] = self.transform[12];
+                root[14] = self.transform[14];
+            }
+            self.object = Some(root);
         }
         Ok(())
     }

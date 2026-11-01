@@ -98,6 +98,11 @@ pub(crate) struct Inspection {
     hull_presentations: Vec<skate2_core::presentation::HullPresentation>,
     /// The additional world the session holds loaded, as it last gave it.
     additional_world: Option<String>,
+    /// PC park editor: the placed mission props, then the held one, as the last visual gave them.
+    mission_props: Vec<(usize, [f32; 16])>,
+    /// The held mission prop as last baked into the city, and when: a moving one is baked again
+    /// at most every `HELD_MISSION_PROP_REBAKE` (each bake rebuilds the city scene).
+    held_mission_prop: Option<((usize, [f32; 16]), std::time::Instant)>,
     proxy_textures: Option<crate::proxy_texture_world::ProxyTextures>,
     queue: NativeRenderQueue,
     focus: [f32; 3],
@@ -144,6 +149,7 @@ pub(crate) struct Inspection {
     environment_resources: Option<Arc<wgpu::BindGroup>>,
     // Keys use archive collection identity, never the moving scene index.
     mesh_cache: BTreeMap<(u64, usize, usize), GpuMesh>,
+    rain_receivers: crate::weather_world::ReceiverCache,
     texture_cache: BTreeMap<(bool, u64, usize, usize), GpuTexture>,
     material_cache: BTreeMap<MaterialKey, Arc<wgpu::BindGroup>>,
     diagnostic_pipelines: BTreeMap<DiagnosticPipelineKey, Arc<wgpu::RenderPipeline>>,
@@ -256,6 +262,8 @@ impl Inspection {
             streaming: None,
             hull_presentations: Vec::new(),
             additional_world: None,
+            mission_props: Vec::new(),
+            held_mission_prop: None,
             proxy_textures: None,
             queue,
             focus,
@@ -286,6 +294,7 @@ impl Inspection {
             location_vaults: None,
             environment_resources: None,
             mesh_cache: BTreeMap::new(),
+            rain_receivers: Default::default(),
             texture_cache: BTreeMap::new(),
             material_cache: BTreeMap::new(),
             diagnostic_pipelines: BTreeMap::new(),
@@ -396,6 +405,14 @@ impl Inspection {
         visual: &skate2_core::SelectedVisualSnapshot<'_>,
     ) -> RenderResult<()> {
         self.media_focus=(!visual.stream_focus_disabled).then_some(visual.stream_focus_position);
+        let now = std::time::Instant::now();
+        self.held_mission_prop = match (visual.held_mission_prop, self.held_mission_prop) {
+            (None, _) => None,
+            (Some(held), Some((baked, at))) if baked != held && now.duration_since(at) < HELD_MISSION_PROP_REBAKE => Some((baked, at)),
+            (Some(held), Some((baked, at))) if baked == held => Some((baked, at)),
+            (Some(held), _) => Some((held, now)),
+        };
+        self.mission_props = visual.mission_props.iter().copied().chain(self.held_mission_prop.map(|(held, _)| held)).collect();
         self.update_city_streaming_at(renderer, scene, visual.stream_focus_position,
             visual.stream_focus_disabled, visual.stream_xml_enabled)
     }
@@ -484,6 +501,7 @@ impl Inspection {
             xml_enabled,
             &self.hull_presentations,
             self.additional_world.as_deref(),
+            &self.mission_props,
         )?
         else {
             return Ok(());
@@ -807,6 +825,9 @@ fn world_from_mesh(submission: &skate2_core::render::NativeRenderSubmission) -> 
 /// treeanimate and vertexanimate add a world-space wave offset first (`P =
 /// In.pos + move`), which remains unimplemented. Every other effect keeps
 /// its staged instance-space inspection.
+/// How often a held, moving mission prop is baked into the city again.
+const HELD_MISSION_PROP_REBAKE: std::time::Duration = std::time::Duration::from_millis(250);
+
 const WORLD_SPACE_EFFECTS: [&str; 29] = [
     "advertisement",
     "alphatestdefaultenvironment",
@@ -1425,6 +1446,9 @@ fn resident_emitter_waypoints(scene: &PresentationScene) -> Vec<Arc<skate2_core:
 /// CPU/GPU replacement owners live on one worker; active draws remain on the window thread.
 struct MapBuild {
     scene: Option<PresentationScene>,
+    // City and DLC streams can reuse the same city spawn name. Give each
+    // additional world its own weather surface and basin cache identity.
+    rain_world: Option<String>,
     textures: Option<TextureScene>,
     queue: NativeRenderQueue,
     diagnostic_techniques: DiagnosticTechniques,
@@ -1432,6 +1456,7 @@ struct MapBuild {
     environment: Arc<EnvironmentLighting>,
     environment_resources: Option<Arc<wgpu::BindGroup>>,
     mesh_cache: BTreeMap<(u64, usize, usize), GpuMesh>,
+    rain_receivers: crate::weather_world::ReceiverCache,
     texture_cache: BTreeMap<(bool, u64, usize, usize), GpuTexture>,
     material_cache: BTreeMap<MaterialKey, Arc<wgpu::BindGroup>>,
     diagnostic_pipelines: BTreeMap<DiagnosticPipelineKey, Arc<wgpu::RenderPipeline>>,
@@ -1463,6 +1488,7 @@ impl Inspection {
             clip,
             view_position,
             frame: self.frame_environment,
+            rain_world: self.streaming.as_ref().and_then(|stream| stream.selected_world()).map(str::to_owned),
             scene: self.scene.take(),
             textures: self.textures.take(),
             queue,
@@ -1471,6 +1497,7 @@ impl Inspection {
             environment: Arc::clone(&self.environment),
             environment_resources: self.environment_resources.take(),
             mesh_cache: std::mem::take(&mut self.mesh_cache),
+            rain_receivers: std::mem::take(&mut self.rain_receivers),
             texture_cache: std::mem::take(&mut self.texture_cache),
             material_cache: std::mem::take(&mut self.material_cache),
             diagnostic_pipelines: std::mem::take(&mut self.diagnostic_pipelines),
@@ -1487,6 +1514,7 @@ impl Inspection {
         self.diagnostic_techniques = build.diagnostic_techniques;
         self.environment_resources = build.environment_resources;
         self.mesh_cache = build.mesh_cache;
+        self.rain_receivers = build.rain_receivers;
         self.texture_cache = build.texture_cache;
         self.material_cache = build.material_cache;
         self.diagnostic_pipelines = build.diagnostic_pipelines;
@@ -1558,7 +1586,8 @@ impl MapBuild {
         let mut map = renderer.map_builder(self.queue.submissions.len());
         let mut shadow_models = BTreeMap::new();
         let mut rain_world=crate::weather_world::World::default();
-        let mut rain_cube=None;let mut rain_seen=BTreeSet::new();
+        let mut rain_cube=None;let mut rain_seen=BTreeSet::new();let mut used_rain_receivers=BTreeSet::new();
+        let (mut rain_reused,mut rain_rebuilt)=(0usize,0usize);
         for submission in &self.queue.submissions {
             let source = submission.scene;
             let collection = scene
@@ -1618,7 +1647,14 @@ impl MapBuild {
                 let cutout=name.starts_with("transparent")||name.starts_with("alphatest")||name.starts_with("tree");
                 let blended=name.starts_with("transparent")||matches!(name,"glare"|"godrayspotlight");
                 let wettable=!decal&&!cutout&&!blended&&!matches!(name,"water"|"flowingwater"|"ocean");
-                if !decal&&!blended {rain_world.add_receiver_mesh(&mesh.geometry,transform,rain_seen.len() as u64,wettable,!cutout);}
+                if !decal&&!blended {
+                    let key=(self.rain_world.clone(),collection.id,source.arena,source.instance,source.mesh,
+                        transform.map(|matrix|matrix.map(f32::to_bits)),wettable,!cutout);
+                    if self.rain_receivers.contains_key(&key) {rain_reused+=1;} else {rain_rebuilt+=1;}
+                    used_rain_receivers.insert(key.clone());
+                    crate::weather_world::add_cached_receiver(&mut rain_world,&mut self.rain_receivers,key,
+                        &mesh.geometry,transform,rain_seen.len() as u64,wettable,!cutout);
+                }
                 if rain_cube.is_none() {
                     for channel in material.channels.iter().rev().filter(|c|c.shader_input=="environment") {
                         if let PresentationMaterialValue::Raster{guid,..}=&channel.value
@@ -1814,6 +1850,8 @@ impl MapBuild {
         // Keep only resources used by this generation. Existing submitted GPU
         // work retains its own references; roaming cannot grow this cache forever.
         self.mesh_cache.retain(|key, _| used_meshes.contains(key));
+        self.rain_receivers.retain(|key, _| used_rain_receivers.contains(key));
+        eprintln!("rain receiver reuse: reused={rain_reused} rebuilt={rain_rebuilt} retained={}",self.rain_receivers.len());
         self.texture_cache
             .retain(|key, _| used_textures.contains(key));
         self.material_cache
@@ -1846,7 +1884,8 @@ impl MapBuild {
                 envattributes2: self.environment.exposure(),
             }),
         );
-        map.rain_location=scene.location_name.clone();
+        map.rain_location=self.rain_world.as_ref().map_or_else(||scene.location_name.clone(),
+            |world|format!("{}::{world}",scene.location_name));
         crate::gpu_renderer::rain::prepare(renderer,rain_world,rain_cube,&map.rain_surface)?;
         map.set_view(self.clip, self.view_position, self.frame);
         Ok(map)

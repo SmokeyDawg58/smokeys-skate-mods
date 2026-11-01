@@ -18,7 +18,8 @@ use std::{collections::BTreeMap,sync::Arc};
 
 /// Version 2 adds the world location (`SerializeReplayDataToDataBuffer` writes
 /// `sGameInfo.additionalWorldLocation`); a version 1 archive plays in the main world.
-const MAGIC:&[u8;8]=b"SK2PCR03";
+const MAGIC:&[u8;8]=b"SK2PCR04";
+const MAGIC_V3:&[u8;8]=b"SK2PCR03";
 const MAGIC_V2:&[u8;8]=b"SK2PCR02";
 const MAGIC_V1:&[u8;8]=b"SK2PCR01";
 pub(super) struct Archive {
@@ -68,6 +69,17 @@ fn get_pedestrian(r:&mut Reader<'_>,c:&mut Loaded)->Result<SelectedPedestrianVis
         local_bounds:Store::get(r)?,bounds_center:Store::get(r)?,world_bounds:Store::get(r)?,
         opacity_parameters:Store::get(r)?,opacity_settings:Store::get(r)?,simulation_center_velocity:Store::get(r)?})
 }
+fn put_weather(weather:Option<crate::ui::weather::ReplayWeather>,w:&mut Writer) {
+    weather.is_some().put(w);
+    if let Some(weather)=weather {(weather.mode as u8).put(w);weather.phase.put(w);}
+}
+fn get_weather(r:&mut Reader<'_>,recorded:bool)->Result<Option<crate::ui::weather::ReplayWeather>> {
+    if !recorded || !bool::get(r)? {return Ok(None);}
+    let mode=crate::ui::weather::Mode::from_recorded(u8::get(r)?).ok_or("invalid replay weather mode")?;
+    let phase=f32::get(r)?;
+    if !phase.is_finite() || phase<0. {return Err("invalid replay weather phase".into());}
+    Ok(Some(crate::ui::weather::ReplayWeather {mode,phase}))
+}
 fn put_frame(frame:&ReplayFrame,w:&mut Writer,c:&mut Catalog,boards:bool)->Result<()> {
     let v=&frame.visual;v.tick.put(w);v.sim_rate.put(w);v.camera.put(w);v.living_world.put(w);
     v.skaters.len().put(w);
@@ -82,9 +94,10 @@ fn put_frame(frame:&ReplayFrame,w:&mut Writer,c:&mut Catalog,boards:bool)->Resul
     for p in &frame.world.pedestrians {put_pedestrian(p,w,c)?;}
     frame.world.traffic_lights.put(w);
     if boards {frame.world.local_board_deck.put(w);frame.world.dropped_boards.put(w);}
+    put_weather(frame.weather,w);
     Ok(())
 }
-fn get_frame(r:&mut Reader<'_>,c:&mut Loaded,boards:bool)->Result<ReplayFrame> {
+fn get_frame(r:&mut Reader<'_>,c:&mut Loaded,boards:bool,weather_recorded:bool)->Result<ReplayFrame> {
     let tick=Store::get(r)?;let sim_rate=Store::get(r)?;let camera=Store::get(r)?;let living_world=Store::get(r)?;
     let count=usize::get(r)?;if count==0||count>256 {return Err("replay skater count".into());}
     let mut skaters=Vec::with_capacity(count);
@@ -111,8 +124,9 @@ fn get_frame(r:&mut Reader<'_>,c:&mut Loaded,boards:bool)->Result<ReplayFrame> {
     let pedestrians=(0..count).map(|_|get_pedestrian(r,c)).collect::<Result<Vec<_>>>()?;
     let traffic_lights=Store::get(r)?;
     let (local_board_deck,dropped_boards)=if boards {(Store::get(r)?,Store::get(r)?)} else {(None,Vec::new())};
+    let weather=get_weather(r,weather_recorded)?;
     Ok(ReplayFrame {visual:PresentationSubmission {camera,skaters,living_world,tick,sim_rate},audio,
-        world:RecordedWorld {dynamic_objects,vehicles,pedestrians,traffic_lights,local_board_deck,dropped_boards},local_skater,players_recipe})
+        world:RecordedWorld {dynamic_objects,vehicles,pedestrians,traffic_lights,local_board_deck,dropped_boards},local_skater,players_recipe,weather})
 }
 
 pub(super) fn encode(take:&EditableTake,film_pack:bool,world_location:Option<u64>,hull_states:Vec<u8>,
@@ -137,11 +151,11 @@ pub(super) fn decode(data:&[u8],mounts:&MountSet,vault:&Arc<AttributeRuntimeVaul
     if skate2_formats::skater_profile::native_crc(&data[..length])!=crc {return Err("replay checksum mismatch".into());}
     let mut r=Reader::new(&data[..length]);
     let magic=r.bytes(8)?;
-    let located=if magic==MAGIC || magic==MAGIC_V2 {true} else if magic==MAGIC_V1 {false} else {return Err("unsupported replay archive version".into())};
+    let located=if magic==MAGIC || magic==MAGIC_V3 || magic==MAGIC_V2 {true} else if magic==MAGIC_V1 {false} else {return Err("unsupported replay archive version".into())};
     let take=EditableTake::parse(&Vec::<u8>::get(&mut r)?)?;
     let film_pack=bool::get(&mut r)?;
     let world_location=if located {Some(u64::get(&mut r)?).filter(|&key|key!=u64::MAX)} else {None};
-    let boards=if magic==MAGIC {bool::get(&mut r)?} else {false};
+    let boards=if magic==MAGIC || magic==MAGIC_V3 {bool::get(&mut r)?} else {false};
     let hull_states=Vec::<u8>::get(&mut r)?;
     if hull_states.len()<12 || u32::from_be_bytes(hull_states[..4].try_into().unwrap())!=3
         || u32::from_be_bytes(hull_states[8..12].try_into().unwrap()) as usize>(hull_states.len()-12)/12 {
@@ -158,7 +172,7 @@ pub(super) fn decode(data:&[u8],mounts:&MountSet,vault:&Arc<AttributeRuntimeVaul
     let mut index=ReplaySystem::default();let mut frames=BTreeMap::new();
     for _ in 0..count {
         let number=u32::get(&mut r)?;if !index.store_frame(number).0 {return Err("replay frame order".into());}
-        frames.insert(number,Arc::new(get_frame(&mut r,&mut catalog,boards)?));
+        frames.insert(number,Arc::new(get_frame(&mut r,&mut catalog,boards,magic==MAGIC)?));
     }
     // Pins can retain old footage across gaps longer than the ring's normal
     // duration. Validate against the saved frame span, without a time cap.
@@ -166,4 +180,16 @@ pub(super) fn decode(data:&[u8],mounts:&MountSet,vault:&Arc<AttributeRuntimeVaul
     if take.length()!=span.max(1.5) {return Err("replay edit track does not match recorded frame span".into());}
     if r.offset!=r.data.len() {return Err("trailing replay data".into());}
     Ok(Archive {take,film_pack,world_location,hull_states,index,frames})
+}
+
+#[cfg(test)] mod weather_tests {
+    use super::*;
+    #[test] fn replay_weather_roundtrips_and_old_frames_need_no_weather_bytes() {
+        let saved=crate::ui::weather::ReplayWeather{mode:crate::ui::weather::Mode::HeavyRain,phase:42.125};
+        let mut writer=Writer::default();put_weather(Some(saved),&mut writer);
+        assert_eq!(get_weather(&mut Reader::new(&writer.0),true).unwrap(),Some(saved));
+        assert_eq!(get_weather(&mut Reader::new(&[]),false).unwrap(),None);
+        let mut invalid=Writer::default();put_weather(Some(crate::ui::weather::ReplayWeather{phase:f32::NAN,..saved}),&mut invalid);
+        assert!(get_weather(&mut Reader::new(&invalid.0),true).is_err());
+    }
 }

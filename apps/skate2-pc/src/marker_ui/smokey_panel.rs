@@ -20,10 +20,10 @@ pub(super) fn draw(assets:&Assets, size:(u32,u32), version:&str, status:&str, ba
         (version,982.,197.,11.,muted),
         (status,1104.,197.,11.,pink),
         ("LATEST UPDATE",982.,228.,10.,pink),
-        ("Storms, rain & water physics",982.,246.,12.,cream),
-        ("Controller settings & preview",982.,264.,12.,cream),
+        ("Debug camera & park editor",982.,246.,12.,cream),
+        ("Weather & Skate 3 physics",982.,264.,12.,cream),
         ("TIP",982.,302.,10.,pink),
-        ("Weather: Options > Mods",982.,320.,11.,muted),
+        ("Debug Camera: Mods > Keybinds",982.,320.,11.,muted),
         ("Press Y for more",982.,343.,10.,muted),
     ] {panel_text(&mut text,font,atlas,line,x,y,h,color);}
     let aspect=size.0 as f32/size.1.max(1) as f32;

@@ -173,8 +173,11 @@ impl SceneCharacterModels {
         vault: &Arc<AttributeRuntimeVault>,
         cvars: &InputCvarReferences,
     ) {
-        let built: Vec<_> = characters.iter().map(|c| (c.slot, c.schema.clone())).collect();
-        if built != self.built {
+        // Compared in place: no per-tick copy of every schema name.
+        let same = characters.len() == self.built.len()
+            && characters.iter().zip(&self.built).all(|(c, (slot, schema))| c.slot == *slot && c.schema == *schema);
+        if !same {
+            let built: Vec<_> = characters.iter().map(|c| (c.slot, c.schema.clone())).collect();
             self.models.clear();
             self.pending.clear();
             for character in characters.iter().filter(|c| !c.borrowed) {
@@ -324,12 +327,21 @@ fn scene_model(
     local_bounds.minimum[1] -= 1.0;
     local_bounds.maximum[1] -= 1.0;
     let palette = CharacterPalette::new(scene, &hierarchy, 0).map_err(|e| e.to_string())?;
+    let skater_materials = || -> Result<CharacterMaterialAdmission, String> {
+        let mut materials = CharacterMaterialAdmission::try_new(&finalized, &palette, Arc::clone(vault), cvars.clone()).map_err(|e| e.to_string())?;
+        materials.try_construct_scene_character().map_err(|e| e.to_string())?;
+        Ok(materials)
+    };
     let (materials, colours) = if colorized {
         (None, Some(colorized_colours(vault, &character.schema)?))
     } else {
-        let mut materials = CharacterMaterialAdmission::try_new(&finalized, &palette, Arc::clone(vault), cvars.clone()).map_err(|e| e.to_string())?;
-        materials.try_construct_scene_character().map_err(|e| e.to_string())?;
-        (Some(materials), None)
+        match skater_materials() {
+            Ok(materials) => (Some(materials), None),
+            // PC park editor: a marquee recipe in the vehicle effect (Big Black's SUV) draws as
+            // a Vehicle recipe's ColorizedSkaterPresEntity.
+            Err(error) if error.contains("\"vehicle\"") => (None, Some(colorized_colours(vault, &character.schema)?)),
+            Err(error) => return Err(error),
+        }
     };
     Ok(SceneCharacterModel { slot: character.slot, palette, materials, colours, local_bounds, _finalized: finalized, pose: None })
 }

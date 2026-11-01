@@ -407,6 +407,7 @@ mod tests {
             dependencies: Vec::new(),
             loose: Vec::new(),
             hulls: Vec::new(),
+            placed: Vec::new(),
             proxies: Vec::new(),
             location_name: "test".to_owned(),
             focus: [0.0; 3],
