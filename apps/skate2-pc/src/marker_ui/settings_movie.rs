@@ -297,6 +297,12 @@ impl SettingsMovie {
                 }
             }
         }
+        // Dim unavailable Skate 3 controls even when the selection moves.
+        for (index, row) in state.rows().iter().enumerate() {
+            let item = child(&mut self.root, &format!("mItem{index}"))?;
+            item.entry.colour_scale = if state.row_enabled(*row) { u32::MAX } else { 0x60ff_ffff };
+            item.clip.script_transform = true;
+        }
         self.refresh_stick_preview();
         Ok(())
     }
@@ -376,7 +382,9 @@ fn options_row(assets: &Assets, state: &Snapshot, row: Row) -> RenderResult<Edit
         Row::RainVolume => Some(state.rain_volume),
         _ => None,
     };
-    let (subtitle, value) = if let Some(value) = volume {
+    let (subtitle, value) = if !state.row_enabled(row) {
+        ("--".into(), 0)
+    } else if let Some(value) = volume {
         let percent = localizer::localized_format_string(assets, "ID_COMMON_PERCENT", &[localizer::AptArgument::Integer(value * 10)])?;
         (String::from_utf16_lossy(&percent), value)
     } else if row == Row::ResolutionScale {

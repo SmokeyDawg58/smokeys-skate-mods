@@ -1,0 +1,41 @@
+{
+  "base_public_commit": "bd9817b3611e996de6e610ca26e74ef0431f1fbc",
+  "source_revision": "92ab9b10320e1ee42752a7a194f0ed635ddba250",
+  "files": [
+    {
+      "path": "CHANGELOG-SMOKEY.md",
+      "sha256": "37e2a20a01b61642bce92458b9161845d64c3cac2afd49009ad6671cd4e3e7e3",
+      "bytes": 2366
+    },
+    {
+      "path": "apps/skate2-pc/src/marker_ui/settings_movie.rs",
+      "sha256": "d8190aec45facc36179ee2c10265dd02d0a3372c289008727bf317c6e4b3cc2d",
+      "bytes": 45710
+    },
+    {
+      "path": "crates/skate2-core/src/session/selected_player_skate3.rs",
+      "sha256": "04ad4f29e847c198df03f12bd442f386392c83f0fa3646fe6990e6123dcce4ee",
+      "bytes": 20135
+    },
+    {
+      "path": "crates/skate2-core/src/ui/gameplay.rs",
+      "sha256": "0deafa21853312ffa15f7fa32e66f428f2c3b72e968d499d37611517cf9e4552",
+      "bytes": 16936
+    },
+    {
+      "path": "crates/skate2-core/src/ui/options.rs",
+      "sha256": "dc6fdfe037c629fb39b7a28d5c4a294324327ed9d025e76106eb8feb7f2e0594",
+      "bytes": 71146
+    },
+    {
+      "path": "crates/skate2-core/src/ui/weather.rs",
+      "sha256": "a29e61eb5973b5f44e9f229f55e884df0abc7188dff512ec4c06f133acf9fe9f",
+      "bytes": 6590
+    },
+    {
+      "path": ".github/RELEASE-NOTES-UPDATE-45.md",
+      "sha256": "1aa3f34c513bc44295bc4f1df3741f8ee0f26384207c35924ebb64dec2948b3b",
+      "bytes": 271
+    }
+  ]
+}

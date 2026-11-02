@@ -156,8 +156,9 @@ impl SelectedPlayerTick {
         let mut mode = owner.skate3.lock().map_err(|_| "native physical mode lock")?;
         let (player_index, _, non_player_ai) = owner.actor_query.lock().map_err(|_| "native player query lock")?
             .as_ref().ok_or("native player query missing")?.try_scoring_identity().map_err(|error|error.to_string())?;
-        let tuning = if non_player_ai { None } else {
-            crate::skate3_native::physics::player::tuning::Tuning::select(self.mod_settings.difficulty)? };
+        let tuning = if non_player_ai { None } else if let Some(difficulty) = self.mod_settings.active_skate3_difficulty() {
+            crate::skate3_native::physics::player::tuning::Tuning::select(difficulty)?
+        } else { None };
         crate::skate3_native::physics::player::tuning::set_owner(&owner, tuning)?;
         let wants_footplant=!non_player_ai && !self.mod_settings.skate3.all && self.mod_settings.skate3.footplants;
         // Let an already-contacting independent plant release through its own
@@ -222,7 +223,9 @@ impl SelectedPlayerTick {
             }
             return Ok(());
         }
-        let difficulty = self.mod_settings.difficulty;
+        // A legacy default has no Skate 3 preset; the menu displays Normal.
+        // Independent off-board mode retains its existing native fallback.
+        let difficulty = self.mod_settings.active_skate3_difficulty().unwrap_or(self.mod_settings.difficulty);
         let profile = match difficulty {
             Difficulty::Easy | Difficulty::EasyMotorized => "easy",
             Difficulty::Normal | Difficulty::NormalMotorized => "normal",

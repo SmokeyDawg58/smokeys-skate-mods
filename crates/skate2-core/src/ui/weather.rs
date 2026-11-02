@@ -54,6 +54,8 @@ fn state() -> Result<&'static AtomicU16, String> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
             Err(e) => return Err(e.to_string()),
         };
+        // Old snow preferences remain readable, but snow is not part of this release.
+        if matches!(config.mode, Mode::LightSnow | Mode::HeavySnow) { config.mode = Mode::Clear; }
         // Diagnostic override is subprocess-only, never changes ordinary preferences.
         if let Ok(key) = std::env::var("SKATE2_WEATHER") { config.mode = Mode::parse(&key)?; }
         Ok(AtomicU16::new(config.packed()))
@@ -72,9 +74,9 @@ pub fn rain_steps() -> Result<u8, String> { Ok(config()?.rain_steps) }
 pub fn rain_volume() -> Result<f32, String> { Ok(f32::from(rain_steps()?) * 0.1) }
 pub fn cycle(forward: bool) -> Result<(), String> {
     let mut value = config()?;
-    let order=[Mode::Clear,Mode::LightRain,Mode::MediumRain,Mode::HeavyRain,Mode::AfterRain,Mode::LightSnow,Mode::HeavySnow];
+    let order=[Mode::Clear,Mode::LightRain,Mode::MediumRain,Mode::HeavyRain,Mode::AfterRain];
     let index=order.iter().position(|m|*m==value.mode).unwrap_or(0);
-    value.mode=order[(index+if forward {1}else{6})%order.len()];
+    value.mode=order[(index+if forward {1}else{order.len()-1})%order.len()];
     save(value)?;
     crate::diagnostics::test_log::event("weather_mode", format_args!("mode={} local_only=true", value.mode.key()));
     Ok(())

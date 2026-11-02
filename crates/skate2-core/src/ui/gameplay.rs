@@ -108,6 +108,12 @@ impl GameplaySettings {
     pub fn step_difficulty(&mut self, forward: bool) { self.difficulty = self.difficulty.step(forward); }
     pub fn step_preview_difficulty(&mut self, forward: bool) { self.difficulty = self.difficulty.step_simple(forward); }
     pub fn toggle_motor(&mut self) { self.difficulty = self.difficulty.with_motor(!self.difficulty.motor_enabled()); }
+    /// Saved Skate 3 preferences never modify the native Skate 2 solver.
+    pub const fn active_skate3_difficulty(self) -> Option<Difficulty> {
+        if !self.skate3.all { None } else if matches!(self.difficulty, Difficulty::Skate2Default) {
+            Some(Difficulty::Normal)
+        } else { Some(self.difficulty) }
+    }
     pub const fn physics_label(self) -> &'static str { if self.skate3.all { "Skate 3" } else { "Skate 2" } }
     pub fn step_physics(&mut self, _forward: bool) {
         self.skate3 = if self.skate3.all { Skate3Features::default() } else { Skate3Features::ALL };
@@ -117,7 +123,7 @@ impl GameplaySettings {
         self.skate3.simulation(offboard, board_transition)
     }
     #[must_use]
-    pub const fn stock_skate2(self) -> bool { self.skate3.is_empty() && matches!(self.difficulty, Difficulty::Skate2Default) }
+    pub const fn stock_skate2(self) -> bool { self.skate3.is_empty() }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

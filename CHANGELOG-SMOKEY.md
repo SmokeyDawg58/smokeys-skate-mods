@@ -1,5 +1,10 @@
 # Smokey's Skate Mods changelog
 
+## Update 45
+
+- Skate 2 now uses its own physics without Skate 3 difficulty or Motorized tuning. Those controls are available for Skate 3, and their settings are remembered.
+- Removed the unfinished snow choices; rain and after-rain weather remain available.
+
 ## Update 44
 
 - Physics is now a separate Skate 2 / Skate 3 choice. Difficulty only lists Easy, Normal and Hardcore, and Motorized has its own toggle. Existing settings are preserved.
@@ -17,15 +22,3 @@
 - **Updater:** The updater checks for releases and can fall back to the official game when a compatible mod build is unavailable, while keeping the updater for a later fix.
 
 The debug camera is a free-roam tool; online camera behavior still needs validation. The experimental Skate 1 physics are not part of this update. You need your own Skate 2 game files; the prepared mod build includes the park pieces, so no separate Skate 3 install is needed.
-
----
-
-## Update 42 — Skate 2 Rust Port 0.2.9
-
-- Incorporates the current shared Skate 3-inspired skating, scoring, weather, water, and menu features into the 0.2.9 integration.
-- Uses the upstream controller settings rather than the previous separate Smokey controller menu.
-- Keeps the game update notice and Install Update handoff.
-- Adds a verified official-game fallback for an existing mod installation when the published mod does not match the latest official game. The updater remains available and checks for a compatible mod on later launches.
-- Preserves the updater's signed-feed verification, backups, and uninstall flow.
-
-Full checks and limits are documented in [Update 42 validation](docs/VALIDATION-UPDATE-42.md). Earlier feature history can be found in the source evidence documents; this changelog does not reconstruct a complete release-by-release history.

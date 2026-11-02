@@ -275,6 +275,11 @@ pub struct Snapshot {
     pub music_player: bool,
 }
 impl Snapshot {
+    /// These preferences affect only the Skate 3 physics family.
+    #[must_use]
+    pub const fn row_enabled(&self, row: Row) -> bool {
+        !matches!(row, Row::Difficulty | Row::Motorized) || self.gameplay.skate3.all
+    }
     #[must_use]
     pub const fn rows(&self) -> &'static [Row] {
         match self.page {
@@ -681,7 +686,7 @@ impl Controller {
             self.state.selected = 0;
             return Action::None;
         }
-        if input.left == input.right {
+        if input.left == input.right || !self.state.row_enabled(row) {
             return Action::None;
         }
         let step = if input.right { 1.0 } else { -1.0 };
@@ -911,6 +916,37 @@ mod tests {
         menu.update(press(|input| input.cancel = true), &mut settings);
         assert_eq!(menu.snapshot().page, Page::Mods);
         assert_eq!(menu.update(press(|input| input.cancel = true), &mut settings), Action::Exit);
+    }
+    #[test]
+    fn skate2_disables_skate3_tuning_without_losing_preferences() {
+        use super::super::gameplay::Difficulty;
+        let mut profile = ProfileSettings::default();
+        let mut menu = Controller::default();
+        menu.open_mods(VideoScreen::FreeSkate, &profile);
+        menu.acknowledge_intro();
+        menu.update(press(|i| i.select = true), &mut profile);
+        menu.update(press(|i| i.down = true), &mut profile);
+        assert!(!menu.snapshot().row_enabled(Row::Difficulty));
+        let saved = menu.snapshot().gameplay.difficulty;
+        menu.update(press(|i| i.right = true), &mut profile);
+        assert_eq!(menu.snapshot().gameplay.difficulty, saved);
+        menu.update(press(|i| i.down = true), &mut profile);
+        assert!(!menu.snapshot().row_enabled(Row::Motorized));
+        menu.update(press(|i| i.right = true), &mut profile);
+        assert_eq!(menu.snapshot().gameplay.difficulty, saved);
+        menu.update(press(|i| i.up = true), &mut profile);
+        menu.update(press(|i| i.up = true), &mut profile);
+        menu.update(press(|i| i.right = true), &mut profile);
+        assert!(menu.snapshot().row_enabled(Row::Difficulty));
+        assert_eq!(menu.snapshot().gameplay.active_skate3_difficulty(), Some(Difficulty::Normal));
+        menu.update(press(|i| i.down = true), &mut profile);
+        menu.update(press(|i| i.right = true), &mut profile);
+        assert_eq!(menu.snapshot().gameplay.difficulty, Difficulty::Hardcore);
+        menu.update(press(|i| i.up = true), &mut profile);
+        menu.update(press(|i| i.left = true), &mut profile);
+        assert_eq!(menu.snapshot().gameplay.active_skate3_difficulty(), None);
+        assert_eq!(menu.snapshot().gameplay.difficulty, Difficulty::Hardcore);
+        assert!(menu.snapshot().gameplay.stock_skate2());
     }
     #[test]
     fn physics_menu_keeps_mode_difficulty_and_motor_separate() {
